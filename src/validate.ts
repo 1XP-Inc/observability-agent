@@ -1,16 +1,8 @@
 import type { OAConfig } from "./config";
 import type { BundleRequest, NormalizedBundleRequest } from "./types";
+import { HttpError } from "./http-error";
 
-export class HttpError extends Error {
-  constructor(
-    public readonly statusCode: number,
-    message: string,
-    public readonly details?: Record<string, unknown>,
-  ) {
-    super(message);
-    this.name = "HttpError";
-  }
-}
+export { HttpError };
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);

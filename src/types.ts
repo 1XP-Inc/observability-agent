@@ -1,3 +1,16 @@
+export type PodRef = {
+  namespace: string;
+  name: string;
+  podIP?: string;
+  annotations: Record<string, string>;
+  labels: Record<string, string>;
+  containers: string[];
+};
+
+export type LogFetchResult =
+  | { ok: true; text: string }
+  | { ok: false; skipped: true; reason: "no_previous_container" };
+
 export type BundleRequest = {
   timeWindow?: {
     sinceSeconds?: number;

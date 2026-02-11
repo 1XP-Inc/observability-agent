@@ -7,10 +7,7 @@ import { Semaphore } from "./semaphore";
 import type { BundleArtifact, BundleJob, NormalizedBundleRequest } from "./types";
 import { HttpError } from "./validate";
 import { runBundle } from "./bundle-runner";
-
-function isoNow(): string {
-  return new Date().toISOString();
-}
+import { isoNow } from "./util";
 
 export type BundleManager = {
   create: (params: NormalizedBundleRequest) => Promise<BundleJob>;
