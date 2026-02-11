@@ -1,7 +1,8 @@
 import { vi } from "vitest";
-import { HttpError, normalizeBundleRequest } from "../src/validate";
-import { createMockConfig } from "./helpers";
-import type { OAConfig } from "../src/config";
+import { HttpError } from "../../src/http-error";
+import { normalizeBundleRequest } from "../../src/k8s/validate";
+import { createMockConfig } from "../helpers";
+import type { OAConfig } from "../../src/config";
 
 /* ------------------------------------------------------------------ */
 /*  Helper: minimal valid selector-based request body                  */

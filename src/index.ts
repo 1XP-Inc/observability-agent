@@ -2,7 +2,8 @@ import Fastify from "fastify";
 import { loadConfig } from "./config";
 import { authHook } from "./auth";
 import { createBundleManager } from "./bundle-manager";
-import type { BundleJob, NormalizedBundleRequest } from "./types";
+import type { BundleJob } from "./types";
+import type { NormalizedBundleRequest } from "./k8s/types";
 import type { StandaloneNormalizedRequest } from "./standalone/types";
 
 async function main(): Promise<void> {
@@ -24,9 +25,9 @@ async function main(): Promise<void> {
   app.addHook("onRequest", authHook(config));
 
   if (config.mode === "k8s") {
-    const { createK8sClients } = await import("./k8s");
-    const { runBundle } = await import("./bundle-runner");
-    const { registerRoutes } = await import("./routes");
+    const { createK8sClients } = await import("./k8s/client");
+    const { runBundle } = await import("./k8s/bundle-runner");
+    const { registerRoutes } = await import("./k8s/routes");
 
     const { coreV1 } = createK8sClients();
     const runFn = (job: BundleJob<NormalizedBundleRequest>) => runBundle({ config, coreV1, job });

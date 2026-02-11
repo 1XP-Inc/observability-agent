@@ -5,7 +5,7 @@ import {
   readPod,
   readPodLog,
   listEventsNamespaced,
-} from "../src/k8s-compat";
+} from "../../src/k8s/compat";
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                            */

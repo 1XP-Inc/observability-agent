@@ -23,7 +23,7 @@ vi.mock("@kubernetes/client-node", () => {
   };
 });
 
-import { createK8sClients } from "../src/k8s";
+import { createK8sClients } from "../../src/k8s/client";
 import * as k8sMod from "@kubernetes/client-node";
 
 // factory 내부 mock 참조 가져오기

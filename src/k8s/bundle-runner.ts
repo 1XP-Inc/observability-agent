@@ -1,9 +1,10 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { CoreV1Api } from "@kubernetes/client-node";
-import type { OAConfig } from "./config";
-import { createNdjsonGzipWriter } from "./bundle-writer";
-import type { BundleJob, NormalizedBundleRequest, PodRef } from "./types";
+import type { OAConfig } from "../config";
+import { createNdjsonGzipWriter } from "../bundle-writer";
+import type { BundleJob } from "../types";
+import type { NormalizedBundleRequest, PodRef } from "./types";
 import { listPodsBySelector, readPodsByName } from "./pod-resolver";
 import { collectLogs } from "./log-collector";
 import { collectEvents } from "./event-collector";
@@ -12,7 +13,7 @@ import { collectMetrics } from "./metrics-collector";
 export async function runBundle(params: {
   config: OAConfig;
   coreV1: CoreV1Api;
-  job: BundleJob;
+  job: BundleJob<NormalizedBundleRequest>;
 }): Promise<void> {
   const { config, coreV1, job } = params;
   const req: NormalizedBundleRequest = job.params;

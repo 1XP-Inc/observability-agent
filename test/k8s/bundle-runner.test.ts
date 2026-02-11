@@ -1,9 +1,9 @@
 import { vi } from "vitest";
-import type { NormalizedBundleRequest, BundleJob } from "../src/types";
+import type { NormalizedBundleRequest, BundleJob } from "../../src/types";
 
 // ---- Mocks ----
 
-vi.mock("../src/k8s-compat", () => ({
+vi.mock("../../src/k8s/compat", () => ({
   listPodsAllNamespaces: vi.fn(),
   listPodsNamespaced: vi.fn(),
   readPod: vi.fn(),
@@ -11,7 +11,7 @@ vi.mock("../src/k8s-compat", () => ({
   listEventsNamespaced: vi.fn(),
 }));
 
-vi.mock("../src/bundle-writer", () => ({
+vi.mock("../../src/bundle-writer", () => ({
   createNdjsonGzipWriter: vi.fn(),
 }));
 
@@ -28,16 +28,16 @@ vi.mock("undici", () => ({
   fetch: vi.fn(),
 }));
 
-import { runBundle } from "../src/bundle-runner";
+import { runBundle } from "../../src/k8s/bundle-runner";
 import {
   listPodsAllNamespaces,
   listPodsNamespaced,
   readPod,
   readPodLog,
   listEventsNamespaced,
-} from "../src/k8s-compat";
-import { createNdjsonGzipWriter } from "../src/bundle-writer";
-import { createMockConfig, createMockCoreV1Api, createMockPod, createMockEvent } from "./helpers";
+} from "../../src/k8s/compat";
+import { createNdjsonGzipWriter } from "../../src/bundle-writer";
+import { createMockConfig, createMockCoreV1Api, createMockPod, createMockEvent } from "../helpers";
 import { fetch } from "undici";
 import fs from "node:fs/promises";
 

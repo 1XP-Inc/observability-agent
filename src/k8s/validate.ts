@@ -1,8 +1,6 @@
-import type { OAConfig } from "./config";
+import type { OAConfig } from "../config";
 import type { BundleRequest, NormalizedBundleRequest } from "./types";
-import { HttpError } from "./http-error";
-
-export { HttpError };
+import { HttpError } from "../http-error";
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);

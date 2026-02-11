@@ -186,22 +186,25 @@ src/
 ├── config.ts            # Environment-based configuration + mode detection
 ├── auth.ts              # JWT authentication hook
 ├── ip-filter.ts         # IP allowlist filter hook
-├── types.ts             # Shared type definitions
-├── validate.ts          # K8s request validation + normalization
-├── k8s.ts               # K8s client factory
-├── k8s-compat.ts        # K8s client-node version compatibility
-├── routes.ts            # K8s HTTP route handlers
-├── pod-resolver.ts      # Pod target resolution (selector/direct)
+├── types.ts             # Shared type definitions (BundleJob, BundleStatus)
+├── log-utils.ts         # Shared log parsing utilities
 ├── bundle-manager.ts    # Bundle lifecycle + cleanup (generic)
-├── bundle-runner.ts     # K8s log/event/metrics orchestrator
-├── log-collector.ts     # K8s container log collection
-├── event-collector.ts   # K8s event collection
-├── metrics-collector.ts # K8s pod metrics scraping
 ├── bundle-writer.ts     # NDJSON gzip stream writer
 ├── semaphore.ts         # Concurrency limiter
 ├── http-error.ts        # HTTP error class
 ├── util.ts              # Shared utilities
 ├── skill.ts             # Skill manifest loader
+├── k8s/
+│   ├── client.ts            # K8s client factory
+│   ├── compat.ts            # K8s client-node version compatibility
+│   ├── types.ts             # K8s-specific types (PodRef, BundleRequest)
+│   ├── validate.ts          # K8s request validation + normalization
+│   ├── routes.ts            # K8s HTTP route handlers
+│   ├── pod-resolver.ts      # Pod target resolution (selector/direct)
+│   ├── bundle-runner.ts     # K8s log/event/metrics orchestrator
+│   ├── log-collector.ts     # K8s container log collection
+│   ├── event-collector.ts   # K8s event collection
+│   └── metrics-collector.ts # K8s pod metrics scraping
 └── standalone/
     ├── types.ts             # ServiceDef, StandaloneNormalizedRequest
     ├── validate.ts          # Standalone request validation

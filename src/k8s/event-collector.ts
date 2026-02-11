@@ -1,7 +1,7 @@
 import type { CoreV1Api } from "@kubernetes/client-node";
-import type { NdjsonGzipWriter } from "./bundle-writer";
+import type { NdjsonGzipWriter } from "../bundle-writer";
 import type { NormalizedBundleRequest } from "./types";
-import { listEventsNamespaced } from "./k8s-compat";
+import { listEventsNamespaced } from "./compat";
 
 export function eventTimestamp(ev: any): string | undefined {
   const ts =

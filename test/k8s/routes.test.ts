@@ -4,11 +4,11 @@ import jwt from "jsonwebtoken";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { authHook } from "../src/auth";
-import { HttpError } from "../src/validate";
-import { registerRoutes } from "../src/routes";
-import type { BundleJob, BundleArtifact, NormalizedBundleRequest } from "../src/types";
-import { createMockConfig, createMockCoreV1Api, createMockPod } from "./helpers";
+import { authHook } from "../../src/auth";
+import { HttpError } from "../../src/http-error";
+import { registerRoutes } from "../../src/k8s/routes";
+import type { BundleJob, BundleArtifact, NormalizedBundleRequest } from "../../src/types";
+import { createMockConfig, createMockCoreV1Api, createMockPod } from "../helpers";
 
 // ---------------------------------------------------------------------------
 // hasString — replicated for local tests of the helper itself

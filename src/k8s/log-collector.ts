@@ -1,32 +1,10 @@
 import type { CoreV1Api } from "@kubernetes/client-node";
-import type { NdjsonGzipWriter } from "./bundle-writer";
-import { HttpError } from "./http-error";
+import type { NdjsonGzipWriter } from "../bundle-writer";
+import { HttpError } from "../http-error";
 import type { LogFetchResult, NormalizedBundleRequest, PodRef } from "./types";
-import { isoNow } from "./util";
-import { readPodLog } from "./k8s-compat";
-
-export function parseLogLine(line: string, timestamps: boolean): { ts?: string; msg: string } {
-  if (!timestamps) return { msg: line };
-  const idx = line.indexOf(" ");
-  if (idx <= 0) return { msg: line };
-  const ts = line.slice(0, idx);
-  const msg = line.slice(idx + 1);
-  return { ts, msg };
-}
-
-export function shouldExcludeLine(msg: string, excludePatterns: string[]): boolean {
-  for (const pat of excludePatterns) {
-    if (msg.includes(pat)) return true;
-  }
-  return false;
-}
-
-export function parseLineTimeMs(ts: string | undefined): number | undefined {
-  if (!ts) return undefined;
-  const ms = Date.parse(ts);
-  if (!Number.isFinite(ms) || Number.isNaN(ms)) return undefined;
-  return ms;
-}
+import { isoNow } from "../util";
+import { readPodLog } from "./compat";
+import { parseLogLine, shouldExcludeLine, parseLineTimeMs } from "../log-utils";
 
 export async function collectLogsForContainer(params: {
   coreV1: CoreV1Api;

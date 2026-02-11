@@ -1,5 +1,5 @@
 import type { NdjsonGzipWriter } from "../bundle-writer";
-import { parseLogLine, shouldExcludeLine, parseLineTimeMs } from "../log-collector";
+import { parseLogLine, shouldExcludeLine, parseLineTimeMs } from "../log-utils";
 import { isoNow } from "../util";
 import type { ServiceDef, StandaloneNormalizedRequest } from "./types";
 import { tailLines } from "./file-tail";

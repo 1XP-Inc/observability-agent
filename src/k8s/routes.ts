@@ -1,12 +1,13 @@
 import fs from "node:fs";
 import type { FastifyInstance } from "fastify";
 import type { CoreV1Api } from "@kubernetes/client-node";
-import type { OAConfig } from "./config";
-import type { BundleManager } from "./bundle-manager";
+import type { OAConfig } from "../config";
+import type { BundleManager } from "../bundle-manager";
 import type { BundleRequest, NormalizedBundleRequest } from "./types";
-import { normalizeBundleRequest, HttpError } from "./validate";
-import { loadSkillMarkdown } from "./skill";
-import { listPodsAllNamespaces, listPodsNamespaced } from "./k8s-compat";
+import { normalizeBundleRequest } from "./validate";
+import { HttpError } from "../http-error";
+import { loadSkillMarkdown } from "../skill";
+import { listPodsAllNamespaces, listPodsNamespaced } from "./compat";
 
 function hasString(v: unknown): v is string {
   return typeof v === "string" && v.length > 0;

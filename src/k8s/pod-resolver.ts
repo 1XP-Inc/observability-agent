@@ -1,7 +1,7 @@
 import type { CoreV1Api } from "@kubernetes/client-node";
-import { HttpError } from "./http-error";
+import { HttpError } from "../http-error";
 import type { PodRef } from "./types";
-import { listPodsAllNamespaces, listPodsNamespaced, readPod } from "./k8s-compat";
+import { listPodsAllNamespaces, listPodsNamespaced, readPod } from "./compat";
 
 export function getPodContainers(pod: any): string[] {
   const containers = (pod.spec?.containers ?? []).map((c: any) => c.name).filter((n: any) => typeof n === "string");

@@ -1,8 +1,8 @@
 import { fetch } from "undici";
-import type { NdjsonGzipWriter } from "./bundle-writer";
-import { HttpError } from "./http-error";
+import type { NdjsonGzipWriter } from "../bundle-writer";
+import { HttpError } from "../http-error";
 import type { NormalizedBundleRequest, PodRef } from "./types";
-import { isoNow, mapWithConcurrency } from "./util";
+import { isoNow, mapWithConcurrency } from "../util";
 
 export function isMetricsAnnotated(pod: PodRef): { enabled: boolean; port?: number; path: string } {
   const scrape = pod.annotations["prometheus.io/scrape"];

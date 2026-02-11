@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import type { OAConfig } from "./config";
 import { Semaphore } from "./semaphore";
 import type { BundleArtifact, BundleJob } from "./types";
-import { HttpError } from "./validate";
+import { HttpError } from "./http-error";
 import { isoNow } from "./util";
 
 export type RunFn<P> = (job: BundleJob<P>) => Promise<void>;
