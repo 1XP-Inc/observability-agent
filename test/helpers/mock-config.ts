@@ -6,6 +6,7 @@ import type { OAConfig } from "../../src/config";
  */
 export function createMockConfig(overrides?: Partial<OAConfig>): OAConfig {
   return {
+    mode: "k8s",
     port: 8080,
     jwtSecret: "test-secret-key-for-testing",
     bundleDir: "/tmp/oa-test-bundles",

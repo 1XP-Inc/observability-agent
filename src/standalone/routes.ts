@@ -1,22 +1,25 @@
 import fs from "node:fs";
 import type { FastifyInstance } from "fastify";
-import type { CoreV1Api } from "@kubernetes/client-node";
-import type { OAConfig } from "./config";
-import type { BundleManager } from "./bundle-manager";
-import type { BundleRequest, NormalizedBundleRequest } from "./types";
-import { normalizeBundleRequest, HttpError } from "./validate";
-import { loadSkillMarkdown } from "./skill";
-import { listPodsAllNamespaces, listPodsNamespaced } from "./k8s-compat";
+import type { OAConfig } from "../config";
+import type { BundleManager } from "../bundle-manager";
+import { HttpError } from "../http-error";
+import { loadSkillMarkdown } from "../skill";
+import type { ServiceDef, StandaloneNormalizedRequest } from "./types";
+import { normalizeStandaloneBundleRequest } from "./validate";
 
 function hasString(v: unknown): v is string {
   return typeof v === "string" && v.length > 0;
 }
 
-export function registerRoutes(
+export function registerStandaloneRoutes(
   app: FastifyInstance,
-  deps: { config: OAConfig; coreV1: CoreV1Api; bundles: BundleManager<NormalizedBundleRequest> },
+  deps: {
+    config: OAConfig;
+    services: ServiceDef[];
+    bundles: BundleManager<StandaloneNormalizedRequest>;
+  },
 ): void {
-  const { config, coreV1, bundles } = deps;
+  const { config, services, bundles } = deps;
 
   app.get("/skill.md", async (_req, reply) => {
     const md = loadSkillMarkdown();
@@ -30,45 +33,18 @@ export function registerRoutes(
     reply.send(md);
   });
 
-  app.get("/v1/pods", async (req, reply) => {
-    const q = (req.query as any) ?? {};
-    const ns = hasString(q.ns) ? q.ns.trim() : "*";
-    const selector = hasString(q.selector) ? q.selector.trim() : undefined;
-    const needle = hasString(q.q) ? q.q : undefined;
-
-    const limit = 500;
-    const body =
-      ns === "*"
-        ? await listPodsAllNamespaces({ coreV1, labelSelector: selector, limit })
-        : await listPodsNamespaced({ coreV1, namespace: ns, labelSelector: selector, limit });
-
-    const items = ((body.items ?? []) as any[]).filter((p: any) => {
-      if (!needle) return true;
-      return String(p?.metadata?.name ?? "").includes(needle);
-    });
-
-    const out = items.map((p: any) => {
-      const cond = (p.status?.conditions ?? []) as any[];
-      const ready = cond.some((c: any) => c.type === "Ready" && c.status === "True");
-      return {
-        namespace: p.metadata?.namespace,
-        name: p.metadata?.name,
-        podIP: p.status?.podIP,
-        labels: p.metadata?.labels ?? {},
-        annotations: p.metadata?.annotations ?? {},
-        containers: (p.spec?.containers ?? []).map((c: any) => c.name),
-        ready,
-        nodeName: p.spec?.nodeName,
-        phase: p.status?.phase,
-      };
-    });
-
-    reply.send({ items: out });
+  app.get("/v1/services", async (_req, reply) => {
+    const items = services.map((s) => ({
+      name: s.name,
+      logs: s.logs ?? [],
+      metrics: s.metrics ?? null,
+    }));
+    reply.send({ items });
   });
 
   app.post("/v1/bundles", async (req, reply) => {
     try {
-      const normalized = normalizeBundleRequest(req.body as BundleRequest, config);
+      const normalized = normalizeStandaloneBundleRequest(req.body, config, services);
       const job = await bundles.create(normalized);
       reply.send({ bundleId: job.bundleId, status: job.status });
     } catch (err: any) {

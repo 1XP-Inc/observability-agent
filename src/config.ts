@@ -1,3 +1,7 @@
+import type { ServiceDef } from "./standalone/types";
+
+export type OAMode = "k8s" | "standalone";
+
 export type OALimits = {
   maxPods: number;
   maxTotalLogLines: number;
@@ -8,6 +12,7 @@ export type OALimits = {
 };
 
 export type OAConfig = {
+  mode: OAMode;
   port: number;
   jwtSecret: string;
   jwtIss?: string;
@@ -19,6 +24,8 @@ export type OAConfig = {
 
   maxInflightBundles: number;
   hardLimits: OALimits;
+
+  services?: ServiceDef[];
 
   defaults: {
     sinceSeconds: number;
@@ -50,11 +57,68 @@ function envInt(name: string, fallback: number): number {
   return n;
 }
 
+function parseServices(): ServiceDef[] | undefined {
+  const raw = envString("OA_SERVICES");
+  if (!raw) return undefined;
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error("OA_SERVICES is not valid JSON");
+  }
+
+  if (!Array.isArray(parsed)) {
+    throw new Error("OA_SERVICES must be a JSON array");
+  }
+
+  const services: ServiceDef[] = [];
+  for (const [i, item] of parsed.entries()) {
+    if (typeof item !== "object" || item === null || Array.isArray(item)) {
+      throw new Error(`OA_SERVICES[${i}] must be an object`);
+    }
+    if (typeof item.name !== "string" || !item.name.trim()) {
+      throw new Error(`OA_SERVICES[${i}].name is required`);
+    }
+    const svc: ServiceDef = { name: item.name.trim() };
+    if (item.logs != null) {
+      if (!Array.isArray(item.logs)) {
+        throw new Error(`OA_SERVICES[${i}].logs must be an array`);
+      }
+      svc.logs = item.logs.map((l: unknown, j: number) => {
+        if (typeof l !== "string" || !l.trim()) {
+          throw new Error(`OA_SERVICES[${i}].logs[${j}] must be a non-empty string`);
+        }
+        return l.trim();
+      });
+    }
+    if (item.metrics != null) {
+      if (typeof item.metrics !== "string" || !item.metrics.trim()) {
+        throw new Error(`OA_SERVICES[${i}].metrics must be a non-empty string`);
+      }
+      svc.metrics = item.metrics.trim();
+    }
+    services.push(svc);
+  }
+
+  const names = new Set<string>();
+  for (const s of services) {
+    if (names.has(s.name)) {
+      throw new Error(`Duplicate service name: ${s.name}`);
+    }
+    names.add(s.name);
+  }
+
+  return services;
+}
+
 export function loadConfig(): OAConfig {
   const jwtSecret = envString("OA_JWT_SECRET");
   if (!jwtSecret) {
     throw new Error("Missing required env: OA_JWT_SECRET");
   }
+
+  const mode: OAMode = envString("KUBERNETES_SERVICE_HOST") ? "k8s" : "standalone";
 
   const port = envInt("OA_PORT", 8080);
 
@@ -70,7 +134,13 @@ export function loadConfig(): OAConfig {
   const bundleTtlMinutes = envInt("OA_BUNDLE_TTL_MINUTES", 60);
   const cleanupIntervalMs = envInt("OA_CLEANUP_INTERVAL_MS", 120_000);
 
+  const services = parseServices();
+  if (mode === "standalone" && !services) {
+    throw new Error("OA_SERVICES is required in standalone mode");
+  }
+
   return {
+    mode,
     port,
     jwtSecret,
     jwtIss: envString("OA_JWT_ISS"),
@@ -82,6 +152,8 @@ export function loadConfig(): OAConfig {
 
     maxInflightBundles: envInt("OA_MAX_INFLIGHT_BUNDLES", 5),
     hardLimits,
+
+    services,
 
     defaults: {
       sinceSeconds: envInt("OA_DEFAULT_SINCE_SECONDS", 600),
@@ -98,4 +170,3 @@ export function loadConfig(): OAConfig {
     },
   };
 }
-

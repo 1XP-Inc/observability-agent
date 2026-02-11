@@ -12,6 +12,8 @@ beforeEach(() => {
       delete process.env[key];
     }
   }
+  // 기존 테스트는 K8s 모드 기반 — KUBERNETES_SERVICE_HOST 설정
+  process.env.KUBERNETES_SERVICE_HOST = "10.0.0.1";
 });
 
 afterAll(() => {
@@ -238,5 +240,162 @@ describe("loadConfig", () => {
     process.env.OA_JWT_SECRET = "s";
     process.env.OA_BUNDLE_DIR = "  /trimmed/path  ";
     expect(loadConfig().bundleDir).toBe("/trimmed/path");
+  });
+
+  // --- mode 감지 ---
+  it("KUBERNETES_SERVICE_HOST 가 있으면 mode='k8s'", () => {
+    process.env.OA_JWT_SECRET = "s";
+    process.env.KUBERNETES_SERVICE_HOST = "10.0.0.1";
+    expect(loadConfig().mode).toBe("k8s");
+  });
+
+  it("KUBERNETES_SERVICE_HOST 가 없으면 mode='standalone'", () => {
+    process.env.OA_JWT_SECRET = "s";
+    delete process.env.KUBERNETES_SERVICE_HOST;
+    process.env.OA_SERVICES = '[{"name":"svc1","logs":["/var/log/test.log"]}]';
+    expect(loadConfig().mode).toBe("standalone");
+  });
+
+  // --- OA_SERVICES 파싱 ---
+  it("standalone 모드에서 OA_SERVICES 미설정 시 에러", () => {
+    process.env.OA_JWT_SECRET = "s";
+    delete process.env.KUBERNETES_SERVICE_HOST;
+    expect(() => loadConfig()).toThrow("OA_SERVICES is required in standalone mode");
+  });
+
+  it("OA_SERVICES 가 유효하지 않은 JSON이면 에러", () => {
+    process.env.OA_JWT_SECRET = "s";
+    delete process.env.KUBERNETES_SERVICE_HOST;
+    process.env.OA_SERVICES = "not-json";
+    expect(() => loadConfig()).toThrow("OA_SERVICES is not valid JSON");
+  });
+
+  it("OA_SERVICES 가 배열이 아니면 에러", () => {
+    process.env.OA_JWT_SECRET = "s";
+    delete process.env.KUBERNETES_SERVICE_HOST;
+    process.env.OA_SERVICES = '{"name":"svc"}';
+    expect(() => loadConfig()).toThrow("OA_SERVICES must be a JSON array");
+  });
+
+  it("OA_SERVICES 항목이 객체가 아니면 에러", () => {
+    process.env.OA_JWT_SECRET = "s";
+    delete process.env.KUBERNETES_SERVICE_HOST;
+    process.env.OA_SERVICES = '["not-object"]';
+    expect(() => loadConfig()).toThrow("OA_SERVICES[0] must be an object");
+  });
+
+  it("OA_SERVICES 항목에 name 이 없으면 에러", () => {
+    process.env.OA_JWT_SECRET = "s";
+    delete process.env.KUBERNETES_SERVICE_HOST;
+    process.env.OA_SERVICES = '[{"logs":["/tmp/a.log"]}]';
+    expect(() => loadConfig()).toThrow("OA_SERVICES[0].name is required");
+  });
+
+  it("OA_SERVICES 항목에 name 이 빈 문자열이면 에러", () => {
+    process.env.OA_JWT_SECRET = "s";
+    delete process.env.KUBERNETES_SERVICE_HOST;
+    process.env.OA_SERVICES = '[{"name":"  "}]';
+    expect(() => loadConfig()).toThrow("OA_SERVICES[0].name is required");
+  });
+
+  it("OA_SERVICES 에 중복 name이 있으면 에러", () => {
+    process.env.OA_JWT_SECRET = "s";
+    delete process.env.KUBERNETES_SERVICE_HOST;
+    process.env.OA_SERVICES = '[{"name":"svc"},{"name":"svc"}]';
+    expect(() => loadConfig()).toThrow("Duplicate service name: svc");
+  });
+
+  it("OA_SERVICES logs가 배열이 아니면 에러", () => {
+    process.env.OA_JWT_SECRET = "s";
+    delete process.env.KUBERNETES_SERVICE_HOST;
+    process.env.OA_SERVICES = '[{"name":"svc","logs":"/tmp/a.log"}]';
+    expect(() => loadConfig()).toThrow("OA_SERVICES[0].logs must be an array");
+  });
+
+  it("OA_SERVICES logs 항목이 빈 문자열이면 에러", () => {
+    process.env.OA_JWT_SECRET = "s";
+    delete process.env.KUBERNETES_SERVICE_HOST;
+    process.env.OA_SERVICES = '[{"name":"svc","logs":[""]}]';
+    expect(() => loadConfig()).toThrow("OA_SERVICES[0].logs[0] must be a non-empty string");
+  });
+
+  it("OA_SERVICES metrics가 빈 문자열이면 에러", () => {
+    process.env.OA_JWT_SECRET = "s";
+    delete process.env.KUBERNETES_SERVICE_HOST;
+    process.env.OA_SERVICES = '[{"name":"svc","metrics":"  "}]';
+    expect(() => loadConfig()).toThrow("OA_SERVICES[0].metrics must be a non-empty string");
+  });
+
+  it("OA_SERVICES 정상 파싱", () => {
+    process.env.OA_JWT_SECRET = "s";
+    delete process.env.KUBERNETES_SERVICE_HOST;
+    process.env.OA_SERVICES = JSON.stringify([
+      { name: "solana-validator", logs: ["/var/log/solana/validator.log"], metrics: "http://localhost:9090/metrics" },
+      { name: "rpc-node", logs: ["/var/log/solana/rpc.log"] },
+    ]);
+    const cfg = loadConfig();
+    expect(cfg.mode).toBe("standalone");
+    expect(cfg.services).toHaveLength(2);
+    expect(cfg.services![0]).toEqual({
+      name: "solana-validator",
+      logs: ["/var/log/solana/validator.log"],
+      metrics: "http://localhost:9090/metrics",
+    });
+    expect(cfg.services![1]).toEqual({
+      name: "rpc-node",
+      logs: ["/var/log/solana/rpc.log"],
+    });
+  });
+
+  it("K8s 모드에서 OA_SERVICES 설정하면 파싱된다", () => {
+    process.env.OA_JWT_SECRET = "s";
+    process.env.KUBERNETES_SERVICE_HOST = "10.0.0.1";
+    process.env.OA_SERVICES = '[{"name":"svc"}]';
+    const cfg = loadConfig();
+    expect(cfg.mode).toBe("k8s");
+    expect(cfg.services).toHaveLength(1);
+  });
+
+  it("K8s 모드에서 OA_SERVICES 없어도 에러 없음", () => {
+    process.env.OA_JWT_SECRET = "s";
+    process.env.KUBERNETES_SERVICE_HOST = "10.0.0.1";
+    const cfg = loadConfig();
+    expect(cfg.mode).toBe("k8s");
+    expect(cfg.services).toBeUndefined();
+  });
+
+  it("OA_SERVICES 항목이 배열이면 에러 (array, not object)", () => {
+    process.env.OA_JWT_SECRET = "s";
+    delete process.env.KUBERNETES_SERVICE_HOST;
+    process.env.OA_SERVICES = '[[1,2]]';
+    expect(() => loadConfig()).toThrow("OA_SERVICES[0] must be an object");
+  });
+
+  it("OA_SERVICES 항목이 null이면 에러", () => {
+    process.env.OA_JWT_SECRET = "s";
+    delete process.env.KUBERNETES_SERVICE_HOST;
+    process.env.OA_SERVICES = '[null]';
+    expect(() => loadConfig()).toThrow("OA_SERVICES[0] must be an object");
+  });
+
+  it("OA_SERVICES logs 항목이 숫자면 에러", () => {
+    process.env.OA_JWT_SECRET = "s";
+    delete process.env.KUBERNETES_SERVICE_HOST;
+    process.env.OA_SERVICES = '[{"name":"svc","logs":[123]}]';
+    expect(() => loadConfig()).toThrow("OA_SERVICES[0].logs[0] must be a non-empty string");
+  });
+
+  it("OA_SERVICES metrics가 숫자면 에러", () => {
+    process.env.OA_JWT_SECRET = "s";
+    delete process.env.KUBERNETES_SERVICE_HOST;
+    process.env.OA_SERVICES = '[{"name":"svc","metrics":123}]';
+    expect(() => loadConfig()).toThrow("OA_SERVICES[0].metrics must be a non-empty string");
+  });
+
+  it("OA_SERVICES name이 숫자면 에러", () => {
+    process.env.OA_JWT_SECRET = "s";
+    delete process.env.KUBERNETES_SERVICE_HOST;
+    process.env.OA_SERVICES = '[{"name":123}]';
+    expect(() => loadConfig()).toThrow("OA_SERVICES[0].name is required");
   });
 });

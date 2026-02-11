@@ -82,13 +82,13 @@ export type BundleArtifact = {
   downloadPath: string;
 };
 
-export type BundleJob = {
+export type BundleJob<P = NormalizedBundleRequest> = {
   bundleId: string;
   status: BundleStatus;
   createdAt: string;
   updatedAt: string;
   expiresAt: string;
-  params: NormalizedBundleRequest;
+  params: P;
   artifactPath?: string;
   artifactSizeBytes?: number;
   error?: string;

@@ -1,24 +1,24 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import type { CoreV1Api } from "@kubernetes/client-node";
 import type { OAConfig } from "./config";
 import { Semaphore } from "./semaphore";
-import type { BundleArtifact, BundleJob, NormalizedBundleRequest } from "./types";
+import type { BundleArtifact, BundleJob } from "./types";
 import { HttpError } from "./validate";
-import { runBundle } from "./bundle-runner";
 import { isoNow } from "./util";
 
-export type BundleManager = {
-  create: (params: NormalizedBundleRequest) => Promise<BundleJob>;
-  get: (bundleId: string) => BundleJob | undefined;
+export type RunFn<P> = (job: BundleJob<P>) => Promise<void>;
+
+export type BundleManager<P = unknown> = {
+  create: (params: P) => Promise<BundleJob<P>>;
+  get: (bundleId: string) => BundleJob<P> | undefined;
   getArtifact: (bundleId: string) => BundleArtifact | undefined;
   startCleanupLoop: () => void;
 };
 
-export function createBundleManager(config: OAConfig, coreV1: CoreV1Api): BundleManager {
+export function createBundleManager<P>(config: OAConfig, runFn: RunFn<P>): BundleManager<P> {
   const sem = new Semaphore(config.maxInflightBundles);
-  const jobs = new Map<string, BundleJob>();
+  const jobs = new Map<string, BundleJob<P>>();
 
   async function cleanupOnce(): Promise<void> {
     try {
@@ -53,7 +53,7 @@ export function createBundleManager(config: OAConfig, coreV1: CoreV1Api): Bundle
     setInterval(() => void cleanupOnce(), config.cleanupIntervalMs).unref();
   }
 
-  async function create(params: NormalizedBundleRequest): Promise<BundleJob> {
+  async function create(params: P): Promise<BundleJob<P>> {
     if (!sem.tryAcquire()) {
       throw new HttpError(429, "maxInflightBundles exceeded");
     }
@@ -62,7 +62,7 @@ export function createBundleManager(config: OAConfig, coreV1: CoreV1Api): Bundle
     const now = isoNow();
     const expiresAt = new Date(Date.now() + config.bundleTtlMs).toISOString();
 
-    const job: BundleJob = {
+    const job: BundleJob<P> = {
       bundleId,
       status: "queued",
       createdAt: now,
@@ -76,7 +76,7 @@ export function createBundleManager(config: OAConfig, coreV1: CoreV1Api): Bundle
       job.status = "running";
       job.updatedAt = isoNow();
       try {
-        await runBundle({ config, coreV1, job });
+        await runFn(job);
         job.status = "done";
         job.updatedAt = isoNow();
       } catch (err: any) {
@@ -91,7 +91,7 @@ export function createBundleManager(config: OAConfig, coreV1: CoreV1Api): Bundle
     return job;
   }
 
-  function get(bundleId: string): BundleJob | undefined {
+  function get(bundleId: string): BundleJob<P> | undefined {
     return jobs.get(bundleId);
   }
 

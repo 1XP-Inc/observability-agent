@@ -1,9 +1,5 @@
 import { vi } from "vitest";
 
-vi.mock("../src/bundle-runner", () => ({
-  runBundle: vi.fn(async () => {}),
-}));
-
 vi.mock("node:fs/promises", () => ({
   default: {
     mkdir: vi.fn(async () => {}),
@@ -14,9 +10,9 @@ vi.mock("node:fs/promises", () => ({
 }));
 
 import { createBundleManager } from "../src/bundle-manager";
-import { runBundle } from "../src/bundle-runner";
+import type { RunFn } from "../src/bundle-manager";
 import fs from "node:fs/promises";
-import { createMockConfig, createMockCoreV1Api } from "./helpers";
+import { createMockConfig } from "./helpers";
 import type { NormalizedBundleRequest } from "../src/types";
 
 function makeParams(overrides?: Partial<NormalizedBundleRequest>): NormalizedBundleRequest {
@@ -47,11 +43,12 @@ async function flushAsync(ms = 50) {
 
 describe("createBundleManager", () => {
   const config = createMockConfig();
-  const coreV1 = createMockCoreV1Api();
+  let runFn: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     vi.clearAllMocks();
     vi.useFakeTimers({ shouldAdvanceTime: true });
+    runFn = vi.fn(async () => {});
   });
 
   afterEach(() => {
@@ -63,17 +60,17 @@ describe("createBundleManager", () => {
   // ==========================
   describe("create()", () => {
     it("returns BundleJob with bundleId starting with 'bnd_'", async () => {
-      const mgr = createBundleManager(config, coreV1);
+      const mgr = createBundleManager(config, runFn);
       const job = await mgr.create(makeParams());
       expect(job.bundleId).toMatch(/^bnd_/);
     });
 
     it("status starts as 'queued'", async () => {
-      // Block runBundle so the async runner cannot complete before we check status
+      // Block runFn so the async runner cannot complete before we check status
       let resolve!: () => void;
-      (runBundle as any).mockImplementation(() => new Promise<void>((r) => { resolve = r; }));
+      runFn.mockImplementation(() => new Promise<void>((r) => { resolve = r; }));
 
-      const mgr = createBundleManager(config, coreV1);
+      const mgr = createBundleManager(config, runFn);
       const job = await mgr.create(makeParams());
       // Before the microtask runs the IIFE, status should be "queued"
       // But the IIFE sets it to "running" on the next microtask. The create() returns
@@ -86,7 +83,7 @@ describe("createBundleManager", () => {
     });
 
     it("sets createdAt, updatedAt, expiresAt", async () => {
-      const mgr = createBundleManager(config, coreV1);
+      const mgr = createBundleManager(config, runFn);
       const job = await mgr.create(makeParams());
       expect(job.createdAt).toBeDefined();
       expect(job.updatedAt).toBeDefined();
@@ -95,34 +92,34 @@ describe("createBundleManager", () => {
     });
 
     it("stores normalized params", async () => {
-      const mgr = createBundleManager(config, coreV1);
+      const mgr = createBundleManager(config, runFn);
       const params = makeParams();
       const job = await mgr.create(params);
       expect(job.params).toEqual(params);
     });
 
-    it("triggers async runBundle execution", async () => {
-      const mgr = createBundleManager(config, coreV1);
+    it("triggers async runFn execution", async () => {
+      const mgr = createBundleManager(config, runFn);
       await mgr.create(makeParams());
 
       await flushAsync();
-      expect(runBundle).toHaveBeenCalledOnce();
+      expect(runFn).toHaveBeenCalledOnce();
     });
 
-    it("after runBundle completes: status becomes 'done'", async () => {
-      (runBundle as any).mockImplementation(async () => {});
-      const mgr = createBundleManager(config, coreV1);
+    it("after runFn completes: status becomes 'done'", async () => {
+      runFn.mockImplementation(async () => {});
+      const mgr = createBundleManager(config, runFn);
       const job = await mgr.create(makeParams());
 
       await flushAsync();
       expect(job.status).toBe("done");
     });
 
-    it("after runBundle throws: status becomes 'failed' with error message", async () => {
-      (runBundle as any).mockImplementation(async () => {
+    it("after runFn throws: status becomes 'failed' with error message", async () => {
+      runFn.mockImplementation(async () => {
         throw new Error("boom");
       });
-      const mgr = createBundleManager(config, coreV1);
+      const mgr = createBundleManager(config, runFn);
       const job = await mgr.create(makeParams());
 
       await flushAsync();
@@ -130,11 +127,11 @@ describe("createBundleManager", () => {
       expect(job.error).toBe("boom");
     });
 
-    it("after runBundle throws non-Error: status becomes 'failed' with fallback message", async () => {
-      (runBundle as any).mockImplementation(async () => {
+    it("after runFn throws non-Error: status becomes 'failed' with fallback message", async () => {
+      runFn.mockImplementation(async () => {
         throw "string error";
       });
-      const mgr = createBundleManager(config, coreV1);
+      const mgr = createBundleManager(config, runFn);
       const job = await mgr.create(makeParams());
 
       await flushAsync();
@@ -143,13 +140,13 @@ describe("createBundleManager", () => {
     });
 
     it("maxInflightBundles exceeded throws HttpError 429", async () => {
-      // block runBundle so semaphore stays acquired
+      // block runFn so semaphore stays acquired
       let resolve!: () => void;
-      (runBundle as any).mockImplementation(() => new Promise<void>((r) => { resolve = r; }));
+      runFn.mockImplementation(() => new Promise<void>((r) => { resolve = r; }));
 
       const mgr = createBundleManager(
         createMockConfig({ maxInflightBundles: 1 }),
-        coreV1,
+        runFn,
       );
 
       await mgr.create(makeParams());
@@ -170,14 +167,14 @@ describe("createBundleManager", () => {
   // ==========================
   describe("get()", () => {
     it("returns job by bundleId", async () => {
-      const mgr = createBundleManager(config, coreV1);
+      const mgr = createBundleManager(config, runFn);
       const job = await mgr.create(makeParams());
       const found = mgr.get(job.bundleId);
       expect(found).toBe(job);
     });
 
     it("returns undefined for unknown bundleId", () => {
-      const mgr = createBundleManager(config, coreV1);
+      const mgr = createBundleManager(config, runFn);
       expect(mgr.get("bnd_nonexistent")).toBeUndefined();
     });
   });
@@ -187,11 +184,11 @@ describe("createBundleManager", () => {
   // ==========================
   describe("getArtifact()", () => {
     it("returns artifact for done job with artifactSizeBytes", async () => {
-      (runBundle as any).mockImplementation(async ({ job }: any) => {
+      runFn.mockImplementation(async (job: any) => {
         job.artifactPath = "/tmp/test.ndjson.gz";
         job.artifactSizeBytes = 999;
       });
-      const mgr = createBundleManager(config, coreV1);
+      const mgr = createBundleManager(config, runFn);
       const job = await mgr.create(makeParams());
 
       await flushAsync();
@@ -207,9 +204,9 @@ describe("createBundleManager", () => {
 
     it("returns undefined for non-done job", async () => {
       let resolve!: () => void;
-      (runBundle as any).mockImplementation(() => new Promise<void>((r) => { resolve = r; }));
+      runFn.mockImplementation(() => new Promise<void>((r) => { resolve = r; }));
 
-      const mgr = createBundleManager(config, coreV1);
+      const mgr = createBundleManager(config, runFn);
       const job = await mgr.create(makeParams());
       await flushAsync(10);
 
@@ -220,10 +217,10 @@ describe("createBundleManager", () => {
     });
 
     it("returns undefined for done job without artifactSizeBytes", async () => {
-      (runBundle as any).mockImplementation(async () => {
+      runFn.mockImplementation(async () => {
         // Don't set artifactSizeBytes
       });
-      const mgr = createBundleManager(config, coreV1);
+      const mgr = createBundleManager(config, runFn);
       const job = await mgr.create(makeParams());
 
       await flushAsync();
@@ -232,7 +229,7 @@ describe("createBundleManager", () => {
     });
 
     it("returns undefined for unknown bundleId", () => {
-      const mgr = createBundleManager(config, coreV1);
+      const mgr = createBundleManager(config, runFn);
       expect(mgr.getArtifact("bnd_unknown")).toBeUndefined();
     });
   });
@@ -251,7 +248,7 @@ describe("createBundleManager", () => {
         .mockResolvedValueOnce({ mtimeMs: cutoffMs }) // old: expired
         .mockResolvedValueOnce({ mtimeMs: Date.now() }); // new: not expired
 
-      const mgr = createBundleManager(config, coreV1);
+      const mgr = createBundleManager(config, runFn);
       mgr.startCleanupLoop();
       await flushAsync();
 
@@ -263,12 +260,12 @@ describe("createBundleManager", () => {
     });
 
     it("deletes expired job metadata", async () => {
-      (runBundle as any).mockImplementation(async () => {});
+      runFn.mockImplementation(async () => {});
       (fs.readdir as any).mockResolvedValue([]);
 
       const mgr = createBundleManager(
         createMockConfig({ bundleTtlMs: 1 }), // 1ms TTL - expire instantly
-        coreV1,
+        runFn,
       );
       const job = await mgr.create(makeParams());
       await flushAsync();
@@ -287,7 +284,7 @@ describe("createBundleManager", () => {
     it("handles errors gracefully (best-effort)", async () => {
       (fs.readdir as any).mockRejectedValue(new Error("ENOENT"));
 
-      const mgr = createBundleManager(config, coreV1);
+      const mgr = createBundleManager(config, runFn);
       // Should not throw
       mgr.startCleanupLoop();
       await flushAsync();
@@ -300,7 +297,7 @@ describe("createBundleManager", () => {
       ]);
       (fs.stat as any).mockResolvedValue({ mtimeMs: 0 }); // very old
 
-      const mgr = createBundleManager(config, coreV1);
+      const mgr = createBundleManager(config, runFn);
       mgr.startCleanupLoop();
       await flushAsync();
 
@@ -312,10 +309,10 @@ describe("createBundleManager", () => {
     });
 
     it("does not delete job with invalid expiresAt (unparseable date)", async () => {
-      (runBundle as any).mockImplementation(async () => {});
+      runFn.mockImplementation(async () => {});
       (fs.readdir as any).mockResolvedValue([]);
 
-      const mgr = createBundleManager(config, coreV1);
+      const mgr = createBundleManager(config, runFn);
       const job = await mgr.create(makeParams());
       await flushAsync();
 
@@ -333,7 +330,7 @@ describe("createBundleManager", () => {
     it("handles mkdir error inside cleanupOnce gracefully", async () => {
       (fs.mkdir as any).mockRejectedValueOnce(new Error("EPERM"));
 
-      const mgr = createBundleManager(config, coreV1);
+      const mgr = createBundleManager(config, runFn);
       // Should not throw
       mgr.startCleanupLoop();
       await flushAsync();
@@ -345,7 +342,7 @@ describe("createBundleManager", () => {
       ]);
       (fs.stat as any).mockRejectedValue(new Error("ENOENT"));
 
-      const mgr = createBundleManager(config, coreV1);
+      const mgr = createBundleManager(config, runFn);
       // The catch block around the entire cleanupOnce should catch stat errors
       mgr.startCleanupLoop();
       await flushAsync();
@@ -359,7 +356,7 @@ describe("createBundleManager", () => {
 
       const mgr = createBundleManager(
         createMockConfig({ cleanupIntervalMs: 500 }),
-        coreV1,
+        runFn,
       );
       mgr.startCleanupLoop();
       await flushAsync();
@@ -381,7 +378,7 @@ describe("createBundleManager", () => {
       ]);
       (fs.stat as any).mockResolvedValue({ mtimeMs: 0 });
 
-      const mgr = createBundleManager(config, coreV1);
+      const mgr = createBundleManager(config, runFn);
       mgr.startCleanupLoop();
       await flushAsync();
 
@@ -398,11 +395,11 @@ describe("createBundleManager", () => {
   // ==========================
   describe("semaphore integration", () => {
     it("releases semaphore after success", async () => {
-      (runBundle as any).mockImplementation(async () => {});
+      runFn.mockImplementation(async () => {});
 
       const mgr = createBundleManager(
         createMockConfig({ maxInflightBundles: 1 }),
-        coreV1,
+        runFn,
       );
 
       await mgr.create(makeParams());
@@ -415,13 +412,13 @@ describe("createBundleManager", () => {
     });
 
     it("releases semaphore after failure", async () => {
-      (runBundle as any)
+      runFn
         .mockImplementationOnce(async () => { throw new Error("fail"); })
         .mockImplementationOnce(async () => {});
 
       const mgr = createBundleManager(
         createMockConfig({ maxInflightBundles: 1 }),
-        coreV1,
+        runFn,
       );
 
       await mgr.create(makeParams());
@@ -436,13 +433,13 @@ describe("createBundleManager", () => {
     it("testing concurrent bundle limit", async () => {
       let resolve1!: () => void;
       let resolve2!: () => void;
-      (runBundle as any)
+      runFn
         .mockImplementationOnce(() => new Promise<void>((r) => { resolve1 = r; }))
         .mockImplementationOnce(() => new Promise<void>((r) => { resolve2 = r; }));
 
       const mgr = createBundleManager(
         createMockConfig({ maxInflightBundles: 2 }),
-        coreV1,
+        runFn,
       );
 
       const job1 = await mgr.create(makeParams());
@@ -459,7 +456,7 @@ describe("createBundleManager", () => {
       await flushAsync();
 
       // Now should succeed
-      (runBundle as any).mockImplementation(async () => {});
+      runFn.mockImplementation(async () => {});
       const job3 = await mgr.create(makeParams());
       expect(job3.bundleId).toMatch(/^bnd_/);
 
