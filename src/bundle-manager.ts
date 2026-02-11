@@ -36,8 +36,9 @@ export function createBundleManager<P>(config: OAConfig, runFn: RunFn<P>): Bundl
         }
       }
 
-      // Drop expired job metadata.
+      // Drop expired job metadata (skip running jobs).
       for (const [id, job] of jobs.entries()) {
+        if (job.status === "running" || job.status === "queued") continue;
         const exp = Date.parse(job.expiresAt);
         if (Number.isFinite(exp) && exp < Date.now()) {
           jobs.delete(id);

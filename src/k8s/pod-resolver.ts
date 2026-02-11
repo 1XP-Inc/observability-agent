@@ -53,7 +53,11 @@ export async function readPodsByName(coreV1: CoreV1Api, pods: Array<{ namespace:
       const body = await readPod({ coreV1, namespace: p.namespace, name: p.pod });
       out.push(podToRef(body));
     } catch (err: any) {
-      throw new HttpError(400, `Pod not found: ${p.namespace}/${p.pod}`);
+      const status = err?.statusCode ?? err?.response?.statusCode;
+      if (status === 404) {
+        throw new HttpError(400, `Pod not found: ${p.namespace}/${p.pod}`);
+      }
+      throw new HttpError(502, `Failed to read pod ${p.namespace}/${p.pod}: ${err?.message ?? "unknown"}`);
     }
   }
   return out;

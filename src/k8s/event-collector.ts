@@ -32,8 +32,8 @@ export async function collectEvents(params: {
       if (req.timeWindow.kind === "absolute" && timeMs > absEndMs!) continue;
 
       const obj = ev.involvedObject;
-      if (obj?.kind === "Pod" && obj.name && !podNames.has(obj.name)) continue;
       if (obj?.kind !== "Pod") continue;
+      if (!obj.name || !podNames.has(obj.name)) continue;
 
       await writer.writeRecord({
         type: "event",

@@ -48,6 +48,7 @@ function makeWriter() {
   const writer = {
     writeRecord: vi.fn(async (r: any) => { records.push(r); }),
     finalize: vi.fn(async () => {}),
+    destroy: vi.fn(),
   };
   (createNdjsonGzipWriter as any).mockReturnValue(writer);
   return { writer, records };
@@ -274,7 +275,9 @@ describe("runBundle", () => {
 
     it("pod not found with pods target throws HttpError 400", async () => {
       makeWriter();
-      (readPod as any).mockRejectedValue(new Error("not found"));
+      const err: any = new Error("not found");
+      err.statusCode = 404;
+      (readPod as any).mockRejectedValue(err);
 
       const job = makeJob({
         params: makeParams({
@@ -1304,7 +1307,7 @@ describe("runBundle", () => {
       expect(eventRecords.length).toBe(0);
     });
 
-    it("event with involvedObject missing name: passes Pod kind check but name is undefined", async () => {
+    it("event with involvedObject missing name: filtered out (cannot match to any pod)", async () => {
       const { records } = makeWriter();
       const pod = createMockPod({ namespace: "default", name: "p1" });
       setupPodList([pod]);
@@ -1324,13 +1327,9 @@ describe("runBundle", () => {
       const job = makeJob();
       await runBundle({ config, coreV1, job });
 
-      // obj.kind === "Pod" && obj.name is falsy → the name check `!podNames.has(obj.name)`
-      // with undefined name → continues (skips since not in pod set)
-      // But actually: the code checks `obj.name && !podNames.has(obj.name)`
-      // If name is undefined, `obj.name` is falsy, so the whole condition is false, it passes through
-      // Then it's included
+      // Pod event without a name cannot be matched to any pod → filtered out
       const eventRecords = records.filter((r) => r.type === "event");
-      expect(eventRecords.length).toBe(1);
+      expect(eventRecords.length).toBe(0);
     });
 
     it("eventTimestamp falls back to creationTimestamp", async () => {

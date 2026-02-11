@@ -22,43 +22,48 @@ export async function runBundle(params: {
   const artifactPath = path.join(config.bundleDir, `${job.bundleId}.ndjson.gz`);
 
   const writer = createNdjsonGzipWriter(artifactPath);
-  await writer.writeRecord({
-    type: "meta",
-    bundleId: job.bundleId,
-    createdAt: job.createdAt,
-    params: req,
-  });
+  try {
+    await writer.writeRecord({
+      type: "meta",
+      bundleId: job.bundleId,
+      createdAt: job.createdAt,
+      params: req,
+    });
 
-  const pods: PodRef[] =
-    req.target.kind === "pods"
-      ? await readPodsByName(coreV1, req.target.pods)
-      : await listPodsBySelector(coreV1, req.target.namespace, req.target.selector, req.limits.maxPods);
+    const pods: PodRef[] =
+      req.target.kind === "pods"
+        ? await readPodsByName(coreV1, req.target.pods)
+        : await listPodsBySelector(coreV1, req.target.namespace, req.target.selector, req.limits.maxPods);
 
-  if (req.include.logs.enabled) {
-    await collectLogs({ coreV1, writer, pods, req });
-  }
-
-  if (req.include.events.enabled) {
-    const podSetByNs: Map<string, Set<string>> = new Map();
-    for (const p of pods) {
-      if (!podSetByNs.has(p.namespace)) podSetByNs.set(p.namespace, new Set());
-      podSetByNs.get(p.namespace)!.add(p.name);
+    if (req.include.logs.enabled) {
+      await collectLogs({ coreV1, writer, pods, req });
     }
 
-    const nowMs = Date.now();
-    const eventsSinceTimeMs =
-      req.timeWindow.kind === "relative"
-        ? nowMs - req.timeWindow.sinceSeconds * 1000
-        : Date.parse(req.timeWindow.start);
+    if (req.include.events.enabled) {
+      const podSetByNs: Map<string, Set<string>> = new Map();
+      for (const p of pods) {
+        if (!podSetByNs.has(p.namespace)) podSetByNs.set(p.namespace, new Set());
+        podSetByNs.get(p.namespace)!.add(p.name);
+      }
 
-    await collectEvents({ coreV1, writer, podSetByNs, req, eventsSinceTimeMs });
+      const nowMs = Date.now();
+      const eventsSinceTimeMs =
+        req.timeWindow.kind === "relative"
+          ? nowMs - req.timeWindow.sinceSeconds * 1000
+          : Date.parse(req.timeWindow.start);
+
+      await collectEvents({ coreV1, writer, podSetByNs, req, eventsSinceTimeMs });
+    }
+
+    if (req.include.metrics.enabled) {
+      await collectMetrics({ writer, pods, req });
+    }
+
+    await writer.finalize();
+  } catch (err) {
+    writer.destroy();
+    throw err;
   }
-
-  if (req.include.metrics.enabled) {
-    await collectMetrics({ writer, pods, req });
-  }
-
-  await writer.finalize();
 
   job.artifactPath = artifactPath;
   const st = await fs.stat(artifactPath);

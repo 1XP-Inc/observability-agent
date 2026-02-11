@@ -105,7 +105,7 @@ describe("collectStandaloneMetrics", () => {
 
     const err = records.filter((r: any) => r.type === "metrics_text" && r.ok === false);
     expect(err.length).toBe(1);
-    expect(err[0].error).toBe("fetch_failed");
+    expect(err[0].error).toBe("fetch_failed: ECONNREFUSED");
   });
 
   it("handles multiple services", async () => {

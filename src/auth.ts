@@ -62,7 +62,8 @@ export function authHook(config: OAConfig) {
 
       // Attach for future use (not required by OA spec yet).
       (request as any).user = verified;
-    } catch {
+    } catch (err) {
+      request.log.debug({ err }, "jwt verification failed");
       reply.code(401).send({ error: "invalid_token" });
     }
   };

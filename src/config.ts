@@ -56,7 +56,13 @@ function envInt(name: string, fallback: number): number {
   const v = envString(name);
   if (v == null) return fallback;
   const n = Number.parseInt(v, 10);
-  if (!Number.isFinite(n) || Number.isNaN(n)) return fallback;
+  if (!Number.isFinite(n)) return fallback;
+  return n;
+}
+
+function envPosInt(name: string, fallback: number): number {
+  const n = envInt(name, fallback);
+  if (n <= 0) throw new Error(`${name} must be > 0`);
   return n;
 }
 
@@ -129,19 +135,19 @@ export function loadConfig(): OAConfig {
 
   const mode: OAMode = envString("KUBERNETES_SERVICE_HOST") ? "k8s" : "standalone";
 
-  const port = envInt("OA_PORT", 8080);
+  const port = envPosInt("OA_PORT", 8080);
 
   const hardLimits: OALimits = {
-    maxPods: envInt("OA_MAX_PODS", 20),
-    maxTotalLogLines: envInt("OA_MAX_TOTAL_LOG_LINES", 50_000),
-    sinceSecondsMax: envInt("OA_SINCE_SECONDS_MAX", 3600),
-    maxMetricsPods: envInt("OA_MAX_METRICS_PODS", 20),
-    metricsConcurrency: envInt("OA_METRICS_CONCURRENCY", 10),
-    metricsTimeoutMs: envInt("OA_METRICS_TIMEOUT_MS", 2000),
+    maxPods: envPosInt("OA_MAX_PODS", 20),
+    maxTotalLogLines: envPosInt("OA_MAX_TOTAL_LOG_LINES", 50_000),
+    sinceSecondsMax: envPosInt("OA_SINCE_SECONDS_MAX", 3600),
+    maxMetricsPods: envPosInt("OA_MAX_METRICS_PODS", 20),
+    metricsConcurrency: envPosInt("OA_METRICS_CONCURRENCY", 10),
+    metricsTimeoutMs: envPosInt("OA_METRICS_TIMEOUT_MS", 2000),
   };
 
-  const bundleTtlMinutes = envInt("OA_BUNDLE_TTL_MINUTES", 60);
-  const cleanupIntervalMs = envInt("OA_CLEANUP_INTERVAL_MS", 120_000);
+  const bundleTtlMinutes = envPosInt("OA_BUNDLE_TTL_MINUTES", 60);
+  const cleanupIntervalMs = envPosInt("OA_CLEANUP_INTERVAL_MS", 120_000);
 
   const allowedIpsRaw = envString("OA_ALLOWED_IPS");
   const allowedIps = allowedIpsRaw
@@ -167,7 +173,7 @@ export function loadConfig(): OAConfig {
     bundleTtlMs: bundleTtlMinutes * 60_000,
     cleanupIntervalMs,
 
-    maxInflightBundles: envInt("OA_MAX_INFLIGHT_BUNDLES", 5),
+    maxInflightBundles: envPosInt("OA_MAX_INFLIGHT_BUNDLES", 5),
     hardLimits,
 
     allowedIps,

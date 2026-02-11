@@ -19,28 +19,33 @@ export async function runStandaloneBundle(params: {
   const artifactPath = path.join(config.bundleDir, `${job.bundleId}.ndjson.gz`);
 
   const writer = createNdjsonGzipWriter(artifactPath);
-  await writer.writeRecord({
-    type: "meta",
-    bundleId: job.bundleId,
-    createdAt: job.createdAt,
-    params: req,
-  });
+  try {
+    await writer.writeRecord({
+      type: "meta",
+      bundleId: job.bundleId,
+      createdAt: job.createdAt,
+      params: req,
+    });
 
-  // Resolve target services
-  const targetServices: ServiceDef[] =
-    req.target.kind === "all"
-      ? services
-      : services.filter((s) => (req.target as { services: string[] }).services.includes(s.name));
+    // Resolve target services
+    const targetServices: ServiceDef[] =
+      req.target.kind === "all"
+        ? services
+        : services.filter((s) => (req.target as { services: string[] }).services.includes(s.name));
 
-  if (req.include.logs.enabled) {
-    await collectStandaloneLogs({ writer, services: targetServices, req });
+    if (req.include.logs.enabled) {
+      await collectStandaloneLogs({ writer, services: targetServices, req });
+    }
+
+    if (req.include.metrics.enabled) {
+      await collectStandaloneMetrics({ writer, services: targetServices, req });
+    }
+
+    await writer.finalize();
+  } catch (err) {
+    writer.destroy();
+    throw err;
   }
-
-  if (req.include.metrics.enabled) {
-    await collectStandaloneMetrics({ writer, services: targetServices, req });
-  }
-
-  await writer.finalize();
 
   job.artifactPath = artifactPath;
   const st = await fs.stat(artifactPath);

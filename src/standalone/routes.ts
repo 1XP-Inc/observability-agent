@@ -1,4 +1,5 @@
-import fs from "node:fs";
+import { createReadStream } from "node:fs";
+import { stat } from "node:fs/promises";
 import type { FastifyInstance } from "fastify";
 import type { OAConfig } from "../config";
 import type { BundleManager } from "../bundle-manager";
@@ -97,18 +98,19 @@ export function registerStandaloneRoutes(
       reply.code(409).send({ error: "bundle_not_ready" });
       return;
     }
-    if (!fs.existsSync(job.artifactPath)) {
+    let fileStat: { size: number };
+    try {
+      fileStat = await stat(job.artifactPath);
+    } catch {
       reply.code(410).send({ error: "bundle_artifact_gone" });
       return;
     }
 
-    const stat = fs.statSync(job.artifactPath);
-
     reply.header("Content-Type", "application/gzip");
     reply.header("Content-Disposition", `attachment; filename="${bundleId}.ndjson.gz"`);
-    reply.header("Content-Length", String(stat.size));
+    reply.header("Content-Length", String(fileStat.size));
     reply.header("Cache-Control", "no-store");
 
-    return reply.send(fs.createReadStream(job.artifactPath));
+    return reply.send(createReadStream(job.artifactPath));
   });
 }

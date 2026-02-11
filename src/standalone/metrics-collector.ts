@@ -54,7 +54,7 @@ export async function collectStandaloneMetrics(params: {
       const msg =
         typeof err?.name === "string" && err.name === "AbortError"
           ? `timeout after ${timeoutMs}ms`
-          : "fetch_failed";
+          : `fetch_failed: ${err?.message ?? "unknown"}`;
       await writer.writeRecord({
         type: "metrics_text",
         service: svc.name,
