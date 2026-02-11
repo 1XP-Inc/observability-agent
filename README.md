@@ -1,14 +1,15 @@
 # OA — Observability Agent
 
-> In-cluster read-only data gateway for Kubernetes logs, events, and pod metrics.
+> Read-only data gateway for logs, events, and metrics. Supports both Kubernetes clusters and bare metal/VM servers (standalone mode).
 
-OA runs as a lightweight sidecar inside your K8s cluster and exposes a simple REST API. AI agents (or any HTTP client) authenticate with a JWT, request a **bundle** of observability data, and receive a compressed NDJSON stream ready for analysis.
+OA exposes a simple REST API. AI agents (or any HTTP client) authenticate with a JWT, request a **bundle** of observability data, and receive a compressed NDJSON stream ready for analysis.
 
 ```mermaid
 flowchart LR
     A["AI Agent\n(client)"] -- "JWT" --> B["OA"]
     B -- "ndjson.gz" --> A
     B -- "K8s API\nPod scrape" --> C["Cluster"]
+    B -- "File tail\nURL scrape" --> D["VM / Bare metal"]
 ```
 
 ---
@@ -16,39 +17,63 @@ flowchart LR
 ## Features
 
 - **Bundle-first workflow** — request a bundle, poll for completion, download a single `.ndjson.gz` artifact
-- **Logs** — container logs with timestamp parsing, time-window filtering, exclude patterns, and `previous` container support
-- **Events** — K8s events scoped to target pods with time-range filtering
-- **Metrics** — Prometheus-annotated pod scraping with concurrency control and timeout handling
+- **Dual mode** — auto-detects K8s or standalone via `KUBERNETES_SERVICE_HOST`
+- **Logs** — K8s container logs or local file tail, with timestamp parsing, time-window filtering, and exclude patterns
+- **Events** — K8s events scoped to target pods (K8s mode only)
+- **Metrics** — Prometheus scraping from pod annotations (K8s) or configured URLs (standalone)
 - **JWT auth** — HS256 shared-secret authentication with mandatory `exp` claim
-- **Hard limits** — configurable caps on pods, log lines, metrics pods, and inflight bundles
-- **Zero write** — purely read-only; never modifies cluster state
+- **Hard limits** — configurable caps on pods, log lines, and inflight bundles
+- **Zero write** — purely read-only; never modifies cluster or server state
 
 ## Quick Start
 
+### K8s Mode
+
 ```bash
-# Build
 npm install && npm run build
-
-# Required: set JWT shared secret
 export OA_JWT_SECRET="your-secret-here"
-
-# Run
 npm start
-# → listening on http://0.0.0.0:8080
+# → K8s mode detected, listening on http://0.0.0.0:8080
+```
+
+### Standalone Mode
+
+```bash
+npm install && npm run build
+export OA_JWT_SECRET="your-secret-here"
+export OA_SERVICES='[
+  {"name":"solana-validator","logs":["/var/log/solana/validator.log"],"metrics":"http://localhost:9090/metrics"},
+  {"name":"rpc-node","logs":["/var/log/solana/rpc.log"]}
+]'
+npm start
+# → Standalone mode, listening on http://0.0.0.0:8080
 ```
 
 ## API
+
+### Common Endpoints
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `GET` | `/healthz` | Health check (no auth) |
 | `GET` | `/skill.md` | Skill manifest for AI agents (no auth) |
-| `GET` | `/v1/pods?ns=*&q=<name>` | Search pods by namespace, label selector, or name |
 | `POST` | `/v1/bundles` | Create a new observability bundle |
 | `GET` | `/v1/bundles/:id` | Check bundle status |
 | `GET` | `/v1/bundles/:id/download` | Download completed bundle (`.ndjson.gz`) |
 
-### Create a Bundle
+### K8s Mode
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/v1/pods?ns=*&q=<name>` | Search pods by namespace, label selector, or name |
+
+### Standalone Mode
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/v1/services` | List registered services |
+
+### Create a Bundle — K8s
 
 ```bash
 curl -X POST https://oa.example.com/v1/bundles \
@@ -68,18 +93,41 @@ curl -X POST https://oa.example.com/v1/bundles \
   }'
 ```
 
+### Create a Bundle — Standalone
+
+```bash
+curl -X POST https://oa.example.com/v1/bundles \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "timeWindow": { "sinceSeconds": 600 },
+    "target": {
+      "kind": "services",
+      "services": ["solana-validator"]
+    },
+    "include": {
+      "logs":    { "enabled": true, "tailLines": 2000 },
+      "metrics": { "enabled": true }
+    }
+  }'
+```
+
 ### NDJSON Record Types
 
-| Type | Description |
-|------|-------------|
-| `meta` | Bundle metadata (bundleId, params, timestamps) |
-| `log` | Container log line with optional timestamp |
-| `event` | K8s event (reason, message, involvedObject) |
-| `metrics_text` | Prometheus scrape result (`ok`, `skipped`, or `error`) |
+| Type | Mode | Description |
+|------|------|-------------|
+| `meta` | Both | Bundle metadata (bundleId, params, timestamps) |
+| `log` | K8s | Container log line (namespace, pod, container, ts, line) |
+| `log` | Standalone | File log line (service, file, ts, line) |
+| `event` | K8s only | K8s event (reason, message, involvedObject) |
+| `metrics_text` | K8s | Pod metrics scrape (namespace, pod, port, path) |
+| `metrics_text` | Standalone | Service metrics scrape (service, url) |
 
 ## Configuration
 
 All configuration is via environment variables with sensible defaults:
+
+### Common
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -88,11 +136,33 @@ All configuration is via environment variables with sensible defaults:
 | `OA_BUNDLE_DIR` | `/tmp/oa-bundles` | Directory for bundle artifacts |
 | `OA_BUNDLE_TTL_MINUTES` | `60` | Bundle artifact TTL |
 | `OA_MAX_INFLIGHT_BUNDLES` | `5` | Max concurrent bundle jobs |
-| `OA_MAX_PODS` | `20` | Hard limit on pods per bundle |
 | `OA_MAX_TOTAL_LOG_LINES` | `50000` | Hard limit on total log lines |
 | `OA_SINCE_SECONDS_MAX` | `3600` | Max time window (1 hour) |
+| `OA_METRICS_TIMEOUT_MS` | `2000` | Per-target metrics scrape timeout |
+
+### K8s Only
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OA_MAX_PODS` | `20` | Hard limit on pods per bundle |
 | `OA_MAX_METRICS_PODS` | `20` | Max pods for metrics scraping |
-| `OA_METRICS_TIMEOUT_MS` | `2000` | Per-pod metrics scrape timeout |
+
+### Standalone Only
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OA_SERVICES` | **required** | JSON array of service definitions |
+
+`OA_SERVICES` format:
+```json
+[
+  { "name": "svc-name", "logs": ["/path/to/log"], "metrics": "http://host:port/metrics" }
+]
+```
+
+- `name` (required): unique service identifier
+- `logs` (optional): array of log file paths to tail
+- `metrics` (optional): Prometheus metrics URL to scrape
 
 ## Testing
 
@@ -103,25 +173,40 @@ npm run test:coverage    # coverage report (98%+ target)
 ```
 
 ```
-12 test files · 361 tests · 98%+ coverage
+18 test files · 473 tests · 98%+ coverage
 ```
 
 ## Architecture
 
 ```
 src/
-├── index.ts             # Fastify app bootstrap + route handlers
-├── config.ts            # Environment-based configuration
+├── index.ts             # Fastify app bootstrap, mode branching
+├── config.ts            # Environment-based configuration + mode detection
 ├── auth.ts              # JWT authentication hook
 ├── types.ts             # Shared type definitions
-├── validate.ts          # Request validation + normalization
+├── validate.ts          # K8s request validation + normalization
 ├── k8s.ts               # K8s client factory
 ├── k8s-compat.ts        # K8s client-node version compatibility
-├── bundle-manager.ts    # Bundle lifecycle + cleanup
-├── bundle-runner.ts     # Log/event/metrics collection orchestrator
+├── routes.ts            # K8s HTTP route handlers
+├── pod-resolver.ts      # Pod target resolution (selector/direct)
+├── bundle-manager.ts    # Bundle lifecycle + cleanup (generic)
+├── bundle-runner.ts     # K8s log/event/metrics orchestrator
+├── log-collector.ts     # K8s container log collection
+├── event-collector.ts   # K8s event collection
+├── metrics-collector.ts # K8s pod metrics scraping
 ├── bundle-writer.ts     # NDJSON gzip stream writer
 ├── semaphore.ts         # Concurrency limiter
-└── skill.ts             # Skill manifest loader
+├── http-error.ts        # HTTP error class
+├── util.ts              # Shared utilities
+├── skill.ts             # Skill manifest loader
+└── standalone/
+    ├── types.ts             # ServiceDef, StandaloneNormalizedRequest
+    ├── validate.ts          # Standalone request validation
+    ├── routes.ts            # Standalone HTTP route handlers
+    ├── bundle-runner.ts     # Standalone collection orchestrator
+    ├── file-tail.ts         # Ring buffer file tail
+    ├── log-collector.ts     # File-based log collection
+    └── metrics-collector.ts # URL-based metrics scraping
 ```
 
 ## License
