@@ -4,7 +4,8 @@ import { promisify } from "node:util";
 const execFileAsync = promisify(execFile);
 
 const TIMEOUT_MS = 10_000;
-const MAX_BUFFER = 10 * 1024 * 1024; // 10 MB
+const MIN_BUFFER = 10 * 1024 * 1024; // 10 MB floor
+const BYTES_PER_LINE = 1024; // 1 KB estimate per line
 
 export async function readJournalLines(params: {
   unit: string;
@@ -25,10 +26,16 @@ export async function readJournalLines(params: {
     args.push("--since", `${sinceSeconds} seconds ago`);
   }
 
-  const { stdout } = await execFileAsync("journalctl", args, {
+  const { stdout, stderr } = await execFileAsync("journalctl", args, {
     timeout: TIMEOUT_MS,
-    maxBuffer: MAX_BUFFER,
+    maxBuffer: Math.max(MIN_BUFFER, maxLines * BYTES_PER_LINE),
   });
+
+  if (stderr && /not seeing messages from other users|permission denied/i.test(stderr)) {
+    const err = new Error(stderr.trim()) as NodeJS.ErrnoException;
+    err.code = "EACCES";
+    throw err;
+  }
 
   if (!stdout.trim()) return [];
   return stdout.trimEnd().split("\n");

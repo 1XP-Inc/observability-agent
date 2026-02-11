@@ -4,7 +4,8 @@ import { promisify } from "node:util";
 const execFileAsync = promisify(execFile);
 
 const TIMEOUT_MS = 30_000;
-const MAX_BUFFER = 50 * 1024 * 1024; // 50 MB
+const MIN_BUFFER = 50 * 1024 * 1024; // 50 MB floor
+const BYTES_PER_LINE = 1024; // 1 KB estimate per line
 
 export async function tailLines(filePath: string, maxLines: number): Promise<string[]> {
   if (maxLines <= 0) return [];
@@ -12,7 +13,7 @@ export async function tailLines(filePath: string, maxLines: number): Promise<str
   try {
     const { stdout } = await execFileAsync("tail", ["-n", String(maxLines), filePath], {
       timeout: TIMEOUT_MS,
-      maxBuffer: MAX_BUFFER,
+      maxBuffer: Math.max(MIN_BUFFER, maxLines * BYTES_PER_LINE),
     });
 
     if (!stdout.trim()) return [];

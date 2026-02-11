@@ -94,7 +94,10 @@ export async function collectStandaloneLogs(params: {
           untilTime: req.timeWindow.kind === "absolute" ? req.timeWindow.end : undefined,
         });
       } catch (err: any) {
-        const reason = err?.code === "ENOENT" ? "journalctl_not_found" : "journal_read_error";
+        const reason =
+          err?.code === "ENOENT" ? "journalctl_not_found" :
+          err?.code === "EACCES" ? "journal_permission_denied" :
+          "journal_read_error";
         await writer.writeRecord({
           type: "log",
           service: svc.name,
@@ -102,7 +105,7 @@ export async function collectStandaloneLogs(params: {
           ts: isoNow(),
           skipped: true,
           reason,
-          error: err?.message,
+          error: err?.stderr?.trim() || err?.message,
         });
         continue;
       }

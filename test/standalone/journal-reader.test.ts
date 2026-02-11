@@ -135,6 +135,28 @@ describe("readJournalLines", () => {
     ).rejects.toThrow("permission denied");
   });
 
+  it("throws EACCES when stderr contains permission hint", async () => {
+    mockExecFileAsync.mockResolvedValue({
+      stdout: "",
+      stderr: "Hint: You are currently not seeing messages from other users and the system.\nUsers in groups 'adm', 'systemd-journal' can see all messages.",
+    });
+
+    await expect(
+      readJournalLines({ unit: "nginx.service", maxLines: 100 }),
+    ).rejects.toMatchObject({ code: "EACCES" });
+  });
+
+  it("throws EACCES when stderr contains 'Permission denied'", async () => {
+    mockExecFileAsync.mockResolvedValue({
+      stdout: "",
+      stderr: "Failed to open journal: Permission denied",
+    });
+
+    await expect(
+      readJournalLines({ unit: "nginx.service", maxLines: 100 }),
+    ).rejects.toMatchObject({ code: "EACCES" });
+  });
+
   it("includes correct base arguments", async () => {
     setupSuccess("line\n");
 

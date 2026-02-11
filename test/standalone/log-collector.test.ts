@@ -308,7 +308,7 @@ describe("collectStandaloneLogs", () => {
   });
 
   it("writes skipped record for journal read errors", async () => {
-    const err = new Error("permission denied") as NodeJS.ErrnoException;
+    const err = new Error("command failed") as NodeJS.ErrnoException;
     err.code = "EPERM";
     mockReadJournalLines.mockRejectedValue(err);
     const services: ServiceDef[] = [{ name: "svc1", journal: "nginx.service" }];
@@ -323,6 +323,25 @@ describe("collectStandaloneLogs", () => {
       journal: "nginx.service",
       skipped: true,
       reason: "journal_read_error",
+    });
+  });
+
+  it("writes journal_permission_denied when EACCES", async () => {
+    const err = new Error("not seeing messages from other users") as NodeJS.ErrnoException;
+    err.code = "EACCES";
+    mockReadJournalLines.mockRejectedValue(err);
+    const services: ServiceDef[] = [{ name: "svc1", journal: "nginx.service" }];
+    const { writer, records } = makeWriter();
+
+    await collectStandaloneLogs({ writer, services, req: makeReq() });
+
+    expect(records.length).toBe(1);
+    expect(records[0]).toMatchObject({
+      type: "log",
+      service: "svc1",
+      journal: "nginx.service",
+      skipped: true,
+      reason: "journal_permission_denied",
     });
   });
 
