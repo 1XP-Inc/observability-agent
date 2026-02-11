@@ -37,6 +37,7 @@ export function registerStandaloneRoutes(
     const items = services.map((s) => ({
       name: s.name,
       logs: s.logs ?? [],
+      journal: s.journal ?? null,
       metrics: s.metrics ?? null,
     }));
     reply.send({ items });

@@ -1,6 +1,7 @@
 export type ServiceDef = {
   name: string;
   logs?: string[];
+  journal?: string;
   metrics?: string;
 };
 

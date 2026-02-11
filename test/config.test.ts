@@ -319,6 +319,36 @@ describe("loadConfig", () => {
     expect(() => loadConfig()).toThrow("OA_SERVICES[0].logs[0] must be a non-empty string");
   });
 
+  it("OA_SERVICES journal 정상 파싱", () => {
+    process.env.OA_JWT_SECRET = "s";
+    delete process.env.KUBERNETES_SERVICE_HOST;
+    process.env.OA_SERVICES = '[{"name":"svc","journal":"nginx.service"}]';
+    const cfg = loadConfig();
+    expect(cfg.services![0].journal).toBe("nginx.service");
+  });
+
+  it("OA_SERVICES journal이 빈 문자열이면 에러", () => {
+    process.env.OA_JWT_SECRET = "s";
+    delete process.env.KUBERNETES_SERVICE_HOST;
+    process.env.OA_SERVICES = '[{"name":"svc","journal":"  "}]';
+    expect(() => loadConfig()).toThrow("OA_SERVICES[0].journal must be a non-empty string");
+  });
+
+  it("OA_SERVICES journal이 숫자면 에러", () => {
+    process.env.OA_JWT_SECRET = "s";
+    delete process.env.KUBERNETES_SERVICE_HOST;
+    process.env.OA_SERVICES = '[{"name":"svc","journal":123}]';
+    expect(() => loadConfig()).toThrow("OA_SERVICES[0].journal must be a non-empty string");
+  });
+
+  it("OA_SERVICES journal 미설정 시 undefined", () => {
+    process.env.OA_JWT_SECRET = "s";
+    delete process.env.KUBERNETES_SERVICE_HOST;
+    process.env.OA_SERVICES = '[{"name":"svc"}]';
+    const cfg = loadConfig();
+    expect(cfg.services![0].journal).toBeUndefined();
+  });
+
   it("OA_SERVICES metrics가 빈 문자열이면 에러", () => {
     process.env.OA_JWT_SECRET = "s";
     delete process.env.KUBERNETES_SERVICE_HOST;

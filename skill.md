@@ -11,7 +11,7 @@ OA는 두 가지 모드로 동작한다. `KUBERNETES_SERVICE_HOST` 환경 변수
 | 모드 | 감지 조건 | 대상 | 로그 소스 | 이벤트 | 메트릭 소스 |
 |------|-----------|------|-----------|--------|-------------|
 | **K8s** | `KUBERNETES_SERVICE_HOST` 있음 | Pod (namespace/selector) | K8s container logs API | K8s Events | Pod annotation 기반 scrape |
-| **Standalone** | `KUBERNETES_SERVICE_HOST` 없음 | Service (`OA_SERVICES` 설정) | 파일 tail | 없음 | 지정 URL 직접 scrape |
+| **Standalone** | `KUBERNETES_SERVICE_HOST` 없음 | Service (`OA_SERVICES` 설정) | 파일 tail + journalctl | 없음 | 지정 URL 직접 scrape |
 
 ## Base
 - **URL**: `https://oa.1xp.vc`
@@ -61,8 +61,8 @@ JWT 규칙:
 ```json
 {
   "items": [
-    { "name": "solana-validator", "logs": ["/var/log/solana/validator.log"], "metrics": "http://localhost:9090/metrics" },
-    { "name": "rpc-node", "logs": ["/var/log/solana/rpc.log"], "metrics": null }
+    { "name": "solana-validator", "logs": ["/var/log/solana/validator.log"], "journal": null, "metrics": "http://localhost:9090/metrics" },
+    { "name": "rpc-node", "logs": ["/var/log/solana/rpc.log"], "journal": null, "metrics": null }
   ]
 }
 ```
@@ -199,11 +199,14 @@ timeWindow 필터링과 함께 **post-filter 단계에서 적용**된다. K8s와
 | type | 설명 | 주요 필드 |
 |------|------|-----------|
 | `log` | 파일 로그 | service, file, ts, line, skipped?, reason? |
+| `log` | 저널 로그 | service, journal, ts, line, skipped?, reason? |
 | `metrics_text` | 서비스 메트릭 | service, url, ts, ok/skipped/error, content |
 
 Standalone 로그 skip 사유:
 - `file_not_found`: 로그 파일이 존재하지 않음
 - `read_error`: 파일 읽기 실패 (권한 등)
+- `journalctl_not_found`: journalctl 바이너리 없음
+- `journal_read_error`: journalctl 실행 실패 (권한 등)
 
 Standalone 메트릭 상태:
 
@@ -314,6 +317,7 @@ pm2 start dist/index.js
 |------|------|------|
 | `name` | O | 서비스 이름 (고유) |
 | `logs` | X | 수집할 로그 파일 경로 배열 |
+| `journal` | X | systemd unit 이름 (journalctl 로그 수집) |
 | `metrics` | X | Prometheus 메트릭 URL |
 
 ---

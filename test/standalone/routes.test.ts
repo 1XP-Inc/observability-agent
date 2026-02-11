@@ -12,7 +12,7 @@ import type { ServiceDef, StandaloneNormalizedRequest } from "../../src/standalo
 
 const SECRET = "test-secret-key-for-testing";
 const services: ServiceDef[] = [
-  { name: "solana-validator", logs: ["/var/log/solana/validator.log"], metrics: "http://localhost:9090/metrics" },
+  { name: "solana-validator", logs: ["/var/log/solana/validator.log"], journal: "sol.service", metrics: "http://localhost:9090/metrics" },
   { name: "rpc-node", logs: ["/var/log/solana/rpc.log"] },
 ];
 
@@ -79,11 +79,13 @@ describe("GET /v1/services", () => {
     expect(body.items[0]).toEqual({
       name: "solana-validator",
       logs: ["/var/log/solana/validator.log"],
+      journal: "sol.service",
       metrics: "http://localhost:9090/metrics",
     });
     expect(body.items[1]).toEqual({
       name: "rpc-node",
       logs: ["/var/log/solana/rpc.log"],
+      journal: null,
       metrics: null,
     });
     await app.close();

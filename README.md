@@ -18,7 +18,7 @@ flowchart LR
 
 - **Bundle-first workflow** — request a bundle, poll for completion, download a single `.ndjson.gz` artifact
 - **Dual mode** — auto-detects K8s or standalone via `KUBERNETES_SERVICE_HOST`
-- **Logs** — K8s container logs or local file tail, with timestamp parsing, time-window filtering, and exclude patterns
+- **Logs** — K8s container logs, local file tail, or journalctl (systemd), with timestamp parsing, time-window filtering, and exclude patterns
 - **Events** — K8s events scoped to target pods (K8s mode only)
 - **Metrics** — Prometheus scraping from pod annotations (K8s) or configured URLs (standalone)
 - **JWT auth** — HS256 shared-secret authentication with mandatory `exp` claim
@@ -119,6 +119,7 @@ curl -X POST https://oa.example.com/v1/bundles \
 | `meta` | Both | Bundle metadata (bundleId, params, timestamps) |
 | `log` | K8s | Container log line (namespace, pod, container, ts, line) |
 | `log` | Standalone | File log line (service, file, ts, line) |
+| `log` | Standalone | Journal log line (service, journal, ts, line) |
 | `event` | K8s only | K8s event (reason, message, involvedObject) |
 | `metrics_text` | K8s | Pod metrics scrape (namespace, pod, port, path) |
 | `metrics_text` | Standalone | Service metrics scrape (service, url) |
@@ -158,12 +159,13 @@ All configuration is via environment variables with sensible defaults:
 `OA_SERVICES` format:
 ```json
 [
-  { "name": "svc-name", "logs": ["/path/to/log"], "metrics": "http://host:port/metrics" }
+  { "name": "svc-name", "logs": ["/path/to/log"], "journal": "unit.service", "metrics": "http://host:port/metrics" }
 ]
 ```
 
 - `name` (required): unique service identifier
 - `logs` (optional): array of log file paths to tail
+- `journal` (optional): systemd unit name for journalctl log collection
 - `metrics` (optional): Prometheus metrics URL to scrape
 
 ## Testing
@@ -211,7 +213,8 @@ src/
     ├── routes.ts            # Standalone HTTP route handlers
     ├── bundle-runner.ts     # Standalone collection orchestrator
     ├── file-tail.ts         # Ring buffer file tail
-    ├── log-collector.ts     # File-based log collection
+    ├── journal-reader.ts    # journalctl (systemd) log reader
+    ├── log-collector.ts     # File + journal log collection
     └── metrics-collector.ts # URL-based metrics scraping
 ```
 

@@ -95,6 +95,12 @@ function parseServices(): ServiceDef[] | undefined {
         return l.trim();
       });
     }
+    if (item.journal != null) {
+      if (typeof item.journal !== "string" || !item.journal.trim()) {
+        throw new Error(`OA_SERVICES[${i}].journal must be a non-empty string`);
+      }
+      svc.journal = item.journal.trim();
+    }
     if (item.metrics != null) {
       if (typeof item.metrics !== "string" || !item.metrics.trim()) {
         throw new Error(`OA_SERVICES[${i}].metrics must be a non-empty string`);
