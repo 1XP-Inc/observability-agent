@@ -49,10 +49,11 @@ export async function collectStandaloneLogs(params: {
         const budget = req.limits.maxTotalLogLines - totalLines;
         if (budget <= 0) return;
 
-        let readSize = budget;
         const maxRead = budget * MAX_READ_MULTIPLIER;
+        let readSize = budget;
         let filtered: ParsedLine[] = [];
         let fileError: any = null;
+        let prevRawCount = -1;
 
         while (readSize <= maxRead) {
           let rawLines: string[];
@@ -65,8 +66,14 @@ export async function collectStandaloneLogs(params: {
 
           filtered = filterLines(rawLines, excludePatterns, absStartMs, absEndMs);
 
-          // Enough results, or file exhausted (fewer lines than requested)
-          if (filtered.length >= budget || rawLines.length < readSize) break;
+          // Stop if: enough clean lines, file exhausted, or same raw count as last read
+          // (same count means file didn't grow and more reads won't help)
+          if (
+            filtered.length >= budget ||
+            rawLines.length < readSize ||
+            rawLines.length === prevRawCount
+          ) break;
+          prevRawCount = rawLines.length;
           readSize = Math.min(readSize * 2, maxRead);
         }
 
@@ -105,10 +112,11 @@ export async function collectStandaloneLogs(params: {
       const budget = req.limits.maxTotalLogLines - totalLines;
       if (budget <= 0) return;
 
-      let readSize = budget;
       const maxRead = budget * MAX_READ_MULTIPLIER;
+      let readSize = budget;
       let filtered: ParsedLine[] = [];
       let journalError: any = null;
+      let prevRawCount = -1;
 
       while (readSize <= maxRead) {
         let rawLines: string[];
@@ -127,7 +135,12 @@ export async function collectStandaloneLogs(params: {
 
         filtered = filterLines(rawLines, excludePatterns, absStartMs, absEndMs);
 
-        if (filtered.length >= budget || rawLines.length < readSize) break;
+        if (
+          filtered.length >= budget ||
+          rawLines.length < readSize ||
+          rawLines.length === prevRawCount
+        ) break;
+        prevRawCount = rawLines.length;
         readSize = Math.min(readSize * 2, maxRead);
       }
 
