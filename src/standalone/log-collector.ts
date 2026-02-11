@@ -23,7 +23,8 @@ export async function collectStandaloneLogs(params: {
       for (const logPath of svc.logs) {
         let lines: string[];
         try {
-          lines = await tailLines(logPath, req.include.logs.tailLines);
+          const budget = req.limits.maxTotalLogLines - totalLines;
+          lines = await tailLines(logPath, budget);
         } catch (err: any) {
           await writer.writeRecord({
             type: "log",
@@ -73,7 +74,7 @@ export async function collectStandaloneLogs(params: {
       try {
         lines = await readJournalLines({
           unit: svc.journal,
-          maxLines: req.include.logs.tailLines,
+          maxLines: req.limits.maxTotalLogLines - totalLines,
           sinceSeconds: req.timeWindow.kind === "relative" ? req.timeWindow.sinceSeconds : undefined,
           sinceTime: req.timeWindow.kind === "absolute" ? req.timeWindow.start : undefined,
           untilTime: req.timeWindow.kind === "absolute" ? req.timeWindow.end : undefined,

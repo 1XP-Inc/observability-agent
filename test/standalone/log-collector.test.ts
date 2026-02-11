@@ -197,9 +197,8 @@ describe("collectStandaloneLogs", () => {
   });
 
   it("writes read_error for non-ENOENT errors", async () => {
-    // Use a directory path — reading a directory with readline throws a non-ENOENT error
-    const dirPath = os.tmpdir();
-    const services: ServiceDef[] = [{ name: "svc1", logs: [dirPath] }];
+    // /dev/null/fake triggers "Not a directory" error from tail (non-ENOENT)
+    const services: ServiceDef[] = [{ name: "svc1", logs: ["/dev/null/fake"] }];
     const { writer, records } = makeWriter();
 
     await collectStandaloneLogs({ writer, services, req: makeReq() });

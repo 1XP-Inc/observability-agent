@@ -1,30 +1,30 @@
-import { createReadStream } from "node:fs";
-import { createInterface } from "node:readline";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+
+const execFileAsync = promisify(execFile);
+
+const TIMEOUT_MS = 30_000;
+const MAX_BUFFER = 50 * 1024 * 1024; // 50 MB
 
 export async function tailLines(filePath: string, maxLines: number): Promise<string[]> {
   if (maxLines <= 0) return [];
 
-  const buf: string[] = new Array(maxLines);
-  let pos = 0;
-  let count = 0;
+  try {
+    const { stdout } = await execFileAsync("tail", ["-n", String(maxLines), filePath], {
+      timeout: TIMEOUT_MS,
+      maxBuffer: MAX_BUFFER,
+    });
 
-  const rl = createInterface({
-    input: createReadStream(filePath, { encoding: "utf-8" }),
-    crlfDelay: Infinity,
-  });
-
-  for await (const line of rl) {
-    buf[pos] = line;
-    pos = (pos + 1) % maxLines;
-    count++;
+    if (!stdout.trim()) return [];
+    // Remove only the final trailing newline, preserving line content
+    const trimmed = stdout.endsWith("\n") ? stdout.slice(0, -1) : stdout;
+    return trimmed.split("\n");
+  } catch (err: any) {
+    if (err.stderr?.includes("No such file or directory")) {
+      const wrapped = new Error(`ENOENT: no such file '${filePath}'`) as NodeJS.ErrnoException;
+      wrapped.code = "ENOENT";
+      throw wrapped;
+    }
+    throw err;
   }
-
-  if (count <= maxLines) return buf.slice(0, count);
-
-  // Ring buffer unwrap: pos points to the oldest entry
-  const result: string[] = new Array(maxLines);
-  for (let i = 0; i < maxLines; i++) {
-    result[i] = buf[(pos + i) % maxLines];
-  }
-  return result;
 }
