@@ -50,31 +50,34 @@ export async function collectStandaloneLogs(params: {
         if (budget <= 0) return;
 
         const maxRead = budget * MAX_READ_MULTIPLIER;
-        let readSize = budget;
         let filtered: ParsedLine[] = [];
         let fileError: any = null;
-        let prevRawCount = -1;
 
-        while (readSize <= maxRead) {
-          let rawLines: string[];
-          try {
-            rawLines = await tailLines(logPath, readSize);
-          } catch (err: any) {
-            fileError = err;
-            break;
-          }
+        // Pass 1: read budget lines
+        let rawLines: string[];
+        try {
+          rawLines = await tailLines(logPath, budget);
+        } catch (err: any) {
+          fileError = err;
+          rawLines = [];
+        }
 
+        if (!fileError) {
           filtered = filterLines(rawLines, excludePatterns, absStartMs, absEndMs);
 
-          // Stop if: enough clean lines, file exhausted, or same raw count as last read
-          // (same count means file didn't grow and more reads won't help)
-          if (
-            filtered.length >= budget ||
-            rawLines.length < readSize ||
-            rawLines.length === prevRawCount
-          ) break;
-          prevRawCount = rawLines.length;
-          readSize = Math.min(readSize * 2, maxRead);
+          // Pass 2: if excludes reduced count, estimate clean rate and read once more
+          if (filtered.length < budget && rawLines.length >= budget && filtered.length > 0) {
+            const cleanRate = filtered.length / rawLines.length;
+            const needed = Math.min(Math.ceil(budget / cleanRate * 1.2), maxRead);
+            try {
+              rawLines = await tailLines(logPath, needed);
+            } catch (err: any) {
+              fileError = err;
+            }
+            if (!fileError) {
+              filtered = filterLines(rawLines, excludePatterns, absStartMs, absEndMs);
+            }
+          }
         }
 
         if (fileError) {
@@ -113,35 +116,46 @@ export async function collectStandaloneLogs(params: {
       if (budget <= 0) return;
 
       const maxRead = budget * MAX_READ_MULTIPLIER;
-      let readSize = budget;
       let filtered: ParsedLine[] = [];
       let journalError: any = null;
-      let prevRawCount = -1;
 
-      while (readSize <= maxRead) {
-        let rawLines: string[];
-        try {
-          rawLines = await readJournalLines({
-            unit: svc.journal,
-            maxLines: readSize,
-            sinceSeconds: req.timeWindow.kind === "relative" ? req.timeWindow.sinceSeconds : undefined,
-            sinceTime: req.timeWindow.kind === "absolute" ? req.timeWindow.start : undefined,
-            untilTime: req.timeWindow.kind === "absolute" ? req.timeWindow.end : undefined,
-          });
-        } catch (err: any) {
-          journalError = err;
-          break;
-        }
+      // Pass 1: read budget lines
+      let rawLines: string[];
+      try {
+        rawLines = await readJournalLines({
+          unit: svc.journal,
+          maxLines: budget,
+          sinceSeconds: req.timeWindow.kind === "relative" ? req.timeWindow.sinceSeconds : undefined,
+          sinceTime: req.timeWindow.kind === "absolute" ? req.timeWindow.start : undefined,
+          untilTime: req.timeWindow.kind === "absolute" ? req.timeWindow.end : undefined,
+        });
+      } catch (err: any) {
+        journalError = err;
+        rawLines = [];
+      }
 
+      if (!journalError) {
         filtered = filterLines(rawLines, excludePatterns, absStartMs, absEndMs);
 
-        if (
-          filtered.length >= budget ||
-          rawLines.length < readSize ||
-          rawLines.length === prevRawCount
-        ) break;
-        prevRawCount = rawLines.length;
-        readSize = Math.min(readSize * 2, maxRead);
+        // Pass 2: if excludes reduced count, estimate clean rate and read once more
+        if (filtered.length < budget && rawLines.length >= budget && filtered.length > 0) {
+          const cleanRate = filtered.length / rawLines.length;
+          const needed = Math.min(Math.ceil(budget / cleanRate * 1.2), maxRead);
+          try {
+            rawLines = await readJournalLines({
+              unit: svc.journal,
+              maxLines: needed,
+              sinceSeconds: req.timeWindow.kind === "relative" ? req.timeWindow.sinceSeconds : undefined,
+              sinceTime: req.timeWindow.kind === "absolute" ? req.timeWindow.start : undefined,
+              untilTime: req.timeWindow.kind === "absolute" ? req.timeWindow.end : undefined,
+            });
+          } catch (err: any) {
+            journalError = err;
+          }
+          if (!journalError) {
+            filtered = filterLines(rawLines, excludePatterns, absStartMs, absEndMs);
+          }
+        }
       }
 
       if (journalError) {
