@@ -17,7 +17,6 @@ export type StandaloneNormalizedRequest = {
   include: {
     logs: {
       enabled: boolean;
-      tailLines: number;
       excludePatterns: string[];
     };
     metrics: { enabled: boolean };

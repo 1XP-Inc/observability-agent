@@ -106,7 +106,7 @@ curl -X POST https://oa.example.com/v1/bundles \
       "services": ["solana-validator"]
     },
     "include": {
-      "logs":    { "enabled": true, "tailLines": 2000 },
+      "logs":    { "enabled": true },
       "metrics": { "enabled": true }
     }
   }'

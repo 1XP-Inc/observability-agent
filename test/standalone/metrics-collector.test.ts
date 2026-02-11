@@ -13,7 +13,7 @@ function makeReq(overrides?: Partial<StandaloneNormalizedRequest>): StandaloneNo
     timeWindow: { kind: "relative", sinceSeconds: 600 },
     target: { kind: "services", services: ["svc1"] },
     include: {
-      logs: { enabled: false, tailLines: 100, excludePatterns: [] },
+      logs: { enabled: false, excludePatterns: [] },
       metrics: { enabled: true },
     },
     limits: { maxTotalLogLines: 50_000, sinceSecondsMax: 3600, metricsTimeoutMs: 2000 },

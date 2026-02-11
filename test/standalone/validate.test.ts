@@ -178,18 +178,6 @@ describe("normalizeStandaloneBundleRequest", () => {
     expect(result.include.logs.enabled).toBe(false);
   });
 
-  it("respects include.logs.tailLines override", () => {
-    const result = normalizeStandaloneBundleRequest(
-      {
-        target: { kind: "services", services: ["solana-validator"] },
-        include: { logs: { tailLines: 500 } },
-      },
-      cfg(),
-      services,
-    );
-    expect(result.include.logs.tailLines).toBe(500);
-  });
-
   it("throws 400 when excludePatterns too large", () => {
     const patterns = Array.from({ length: 51 }, (_, i) => `pat${i}`);
     expect(() => normalizeStandaloneBundleRequest(
@@ -377,7 +365,7 @@ describe("normalizeStandaloneBundleRequest", () => {
       {
         target: { kind: "services", services: ["solana-validator", "rpc-node"] },
         timeWindow: { sinceSeconds: 1800 },
-        include: { logs: { enabled: true, tailLines: 1000, excludePatterns: ["healthcheck"] }, metrics: { enabled: false } },
+        include: { logs: { enabled: true, excludePatterns: ["healthcheck"] }, metrics: { enabled: false } },
       },
       cfg(),
       services,
@@ -387,7 +375,7 @@ describe("normalizeStandaloneBundleRequest", () => {
       timeWindow: { kind: "relative", sinceSeconds: 1800 },
       target: { kind: "services", services: ["solana-validator", "rpc-node"] },
       include: {
-        logs: { enabled: true, tailLines: 1000, excludePatterns: ["healthcheck"] },
+        logs: { enabled: true, excludePatterns: ["healthcheck"] },
         metrics: { enabled: false },
       },
       limits: {

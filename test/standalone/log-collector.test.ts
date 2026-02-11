@@ -18,7 +18,7 @@ function makeReq(overrides?: Partial<StandaloneNormalizedRequest>): StandaloneNo
     timeWindow: { kind: "relative", sinceSeconds: 600 },
     target: { kind: "services", services: ["svc1"] },
     include: {
-      logs: { enabled: true, tailLines: 100, excludePatterns: [] },
+      logs: { enabled: true, excludePatterns: [] },
       metrics: { enabled: false },
     },
     limits: { maxTotalLogLines: 50_000, sinceSecondsMax: 3600, metricsTimeoutMs: 2000 },
@@ -105,7 +105,7 @@ describe("collectStandaloneLogs", () => {
     await collectStandaloneLogs({
       writer,
       services,
-      req: makeReq({ include: { logs: { enabled: true, tailLines: 100, excludePatterns: ["healthcheck"] }, metrics: { enabled: false } } }),
+      req: makeReq({ include: { logs: { enabled: true, excludePatterns: ["healthcheck"] }, metrics: { enabled: false } } }),
     });
 
     const logRecords = records.filter((r: any) => r.type === "log" && r.line);
