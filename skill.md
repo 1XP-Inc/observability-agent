@@ -18,7 +18,7 @@ OA runs in one of two modes, auto-detected by the presence of `KUBERNETES_SERVIC
 
 ## Auth/JWT
 OA verifies JWTs using an **HS256 shared secret**.
-- `OA_JWT_SECRET` (required, HS256 shared secret)
+- `OA_JWT_SECRET` (required, HS256 shared secret, min 32 chars)
 
 JWT rules:
 - Algorithm: **HS256**

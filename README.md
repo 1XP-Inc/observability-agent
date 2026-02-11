@@ -132,7 +132,8 @@ All configuration is via environment variables with sensible defaults:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `OA_JWT_SECRET` | **required** | HS256 shared secret for JWT verification |
+| `OA_JWT_SECRET` | **required** | HS256 shared secret for JWT verification (min 32 chars) |
+| `OA_HOST` | `0.0.0.0` | HTTP listen address |
 | `OA_PORT` | `8080` | HTTP listen port |
 | `OA_BUNDLE_DIR` | `/tmp/oa-bundles` | Directory for bundle artifacts |
 | `OA_BUNDLE_TTL_MINUTES` | `60` | Bundle artifact TTL |
@@ -177,7 +178,7 @@ npm run test:coverage    # coverage report (98%+ target)
 ```
 
 ```
-18 test files · 473 tests · 98%+ coverage
+20 test files · 526 tests · 98%+ coverage
 ```
 
 ## Architecture
