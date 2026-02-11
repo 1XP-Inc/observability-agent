@@ -4,11 +4,11 @@
 
 OA runs as a lightweight sidecar inside your K8s cluster and exposes a simple REST API. AI agents (or any HTTP client) authenticate with a JWT, request a **bundle** of observability data, and receive a compressed NDJSON stream ready for analysis.
 
-```
-┌─────────────┐       JWT        ┌──────┐      K8s API / Pod scrape
-│  AI Agent   │ ──────────────▶  │  OA  │ ──────────────────────────▶  cluster
-│  (client)   │ ◀────────────── │      │
-└─────────────┘   ndjson.gz      └──────┘
+```mermaid
+flowchart LR
+    A["AI Agent\n(client)"] -- "JWT" --> B["OA"]
+    B -- "ndjson.gz" --> A
+    B -- "K8s API\nPod scrape" --> C["Cluster"]
 ```
 
 ---
