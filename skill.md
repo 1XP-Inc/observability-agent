@@ -98,7 +98,7 @@ Rules:
   "timeWindow": { "sinceSeconds": 600 },
   "target": {
     "namespace": "*",
-    "selector": "app=validator,chain=bera"
+    "selector": "app=web,tier=backend"
   },
   "include": {
     "logs": { "enabled": true, "tailLines": 2000, "previous": true, "timestamps": true },
@@ -119,7 +119,7 @@ Rules:
   "timeWindow": { "sinceSeconds": 600 },
   "target": {
     "pods": [
-      { "namespace": "default", "pod": "berachain-apis-mainnet-0" }
+      { "namespace": "default", "pod": "my-app-pod-0" }
     ]
   },
   "include": {
@@ -250,8 +250,8 @@ OA writes a skip record in this case:
 ### K8s Mode
 | User Input | Action |
 |------------|--------|
-| "Analyze berachain mainnet logs" | `GET /v1/pods?q=berachain-mainnet` → bundle all matching pods |
-| "Only berachain mainnet pod 0" | `target.pods: [{pod: "berachain-apis-mainnet-0"}]` |
+| "Analyze backend logs" | `GET /v1/pods?q=backend` → bundle all matching pods |
+| "Only my-app pod 0" | `target.pods: [{pod: "my-app-pod-0"}]` |
 | "All cluster error logs" | `namespace: "*"`, logs only, cluster ERROR/WARN |
 
 ### Standalone Mode
@@ -307,7 +307,7 @@ export OA_SERVICES='[
   {"name":"solana-validator","logs":["/var/log/solana/validator.log"],"metrics":"http://localhost:9090/metrics"},
   {"name":"rpc-node","logs":["/var/log/solana/rpc.log"]}
 ]'
-pm2 start dist/index.js
+node dist/index.js
 ```
 
 Service definition fields:

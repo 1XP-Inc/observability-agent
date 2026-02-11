@@ -13,6 +13,7 @@ export type OALimits = {
 
 export type OAConfig = {
   mode: OAMode;
+  host: string;
   port: number;
   jwtSecret: string;
   jwtIss?: string;
@@ -132,6 +133,9 @@ export function loadConfig(): OAConfig {
   if (!jwtSecret) {
     throw new Error("Missing required env: OA_JWT_SECRET");
   }
+  if (jwtSecret.length < 32) {
+    throw new Error("OA_JWT_SECRET must be at least 32 characters for HS256");
+  }
 
   const mode: OAMode = envString("KUBERNETES_SERVICE_HOST") ? "k8s" : "standalone";
 
@@ -162,8 +166,11 @@ export function loadConfig(): OAConfig {
     throw new Error("OA_SERVICES is required in standalone mode");
   }
 
+  const host = envString("OA_HOST") ?? "0.0.0.0";
+
   return {
     mode,
+    host,
     port,
     jwtSecret,
     jwtIss: envString("OA_JWT_ISS"),

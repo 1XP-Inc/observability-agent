@@ -10,7 +10,7 @@ import { createMockConfig } from "../helpers";
 import type { BundleJob, BundleArtifact } from "../../src/types";
 import type { ServiceDef, StandaloneNormalizedRequest } from "../../src/standalone/types";
 
-const SECRET = "test-secret-key-for-testing";
+const SECRET = "test-secret-key-for-testing-hs256";
 const services: ServiceDef[] = [
   { name: "solana-validator", logs: ["/var/log/solana/validator.log"], journal: "sol.service", metrics: "http://localhost:9090/metrics" },
   { name: "rpc-node", logs: ["/var/log/solana/rpc.log"] },

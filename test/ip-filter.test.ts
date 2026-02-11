@@ -4,7 +4,7 @@ import { parseAllowList, ipFilterHook } from "../src/ip-filter";
 import { authHook } from "../src/auth";
 import { createMockConfig } from "./helpers";
 
-const SECRET = "test-secret-key-for-testing";
+const SECRET = "test-secret-key-for-testing-hs256";
 
 function validToken() {
   return jwt.sign(

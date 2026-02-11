@@ -220,4 +220,4 @@ src/
 
 ## License
 
-UNLICENSED — proprietary software of [1XP](https://1xp.vc).
+Apache-2.0 — see [LICENSE](./LICENSE) for details.

@@ -20,7 +20,7 @@ function hasString(v: unknown): v is string {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-const SECRET = "test-secret-key-for-testing";
+const SECRET = "test-secret-key-for-testing-hs256";
 
 function validToken(payload?: Record<string, any>) {
   return jwt.sign(

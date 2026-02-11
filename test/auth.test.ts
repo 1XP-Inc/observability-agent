@@ -4,7 +4,7 @@ import jwt from "jsonwebtoken";
 import { authHook } from "../src/auth";
 import { createMockConfig } from "./helpers";
 
-const SECRET = "test-secret-key-for-testing";
+const SECRET = "test-secret-key-for-testing-hs256";
 
 function buildApp(configOverrides?: Record<string, any>) {
   const config = createMockConfig({ jwtSecret: SECRET, ...configOverrides });

@@ -79,7 +79,7 @@ describe("runStandaloneBundle", () => {
     makeWriter();
     const job = makeJob();
     await runStandaloneBundle({ config, services, job });
-    expect(fs.mkdir).toHaveBeenCalledWith(config.bundleDir, { recursive: true });
+    expect(fs.mkdir).toHaveBeenCalledWith(config.bundleDir, { recursive: true, mode: 0o700 });
   });
 
   it("writes meta record first", async () => {

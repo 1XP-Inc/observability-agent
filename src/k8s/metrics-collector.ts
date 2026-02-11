@@ -15,7 +15,7 @@ export function isMetricsAnnotated(pod: PodRef): { enabled: boolean; port?: numb
   if (!Number.isFinite(port) || Number.isNaN(port) || port <= 0) return { enabled: false, path: "/metrics" };
 
   const p = pod.annotations["prometheus.io/path"]?.trim();
-  const metricsPath = p && p.startsWith("/") ? p : "/metrics";
+  const metricsPath = p && p.startsWith("/") && !p.includes("..") && !p.includes("?") && !p.includes("#") ? p : "/metrics";
   return { enabled: true, port, path: metricsPath };
 }
 
@@ -70,8 +70,23 @@ export async function collectMetrics(params: {
     const ac = new AbortController();
     const timer = setTimeout(() => ac.abort(), timeoutMs);
     try {
+      const MAX_BODY = 10 * 1024 * 1024;
       const resp = await fetch(url, { signal: ac.signal });
       const text = await resp.text();
+      if (text.length > MAX_BODY) {
+        await writer.writeRecord({
+          type: "metrics_text",
+          namespace: pod.namespace,
+          pod: pod.name,
+          podIP: pod.podIP,
+          port: ann.port,
+          path: ann.path,
+          ts,
+          ok: false,
+          error: `response_too_large (${text.length} bytes)`,
+        });
+        return;
+      }
       if (!resp.ok) {
         await writer.writeRecord({
           type: "metrics_text",

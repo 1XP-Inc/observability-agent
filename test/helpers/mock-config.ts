@@ -8,7 +8,8 @@ export function createMockConfig(overrides?: Partial<OAConfig>): OAConfig {
   return {
     mode: "k8s",
     port: 8080,
-    jwtSecret: "test-secret-key-for-testing",
+    host: "0.0.0.0",
+    jwtSecret: "test-secret-key-for-testing-hs256",
     bundleDir: "/tmp/oa-test-bundles",
     bundleTtlMs: 60 * 60_000,
     cleanupIntervalMs: 120_000,

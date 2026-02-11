@@ -22,7 +22,7 @@ export function createBundleManager<P>(config: OAConfig, runFn: RunFn<P>): Bundl
 
   async function cleanupOnce(): Promise<void> {
     try {
-      await fs.mkdir(config.bundleDir, { recursive: true });
+      await fs.mkdir(config.bundleDir, { recursive: true, mode: 0o700 });
       const entries = await fs.readdir(config.bundleDir, { withFileTypes: true });
       const cutoff = Date.now() - config.bundleTtlMs;
 
@@ -44,8 +44,9 @@ export function createBundleManager<P>(config: OAConfig, runFn: RunFn<P>): Bundl
           jobs.delete(id);
         }
       }
-    } catch {
-      // Best-effort cleanup.
+    } catch (err: any) {
+      // Best-effort cleanup — log so persistent failures are visible.
+      if (typeof console !== "undefined") console.warn("[oa] cleanup error:", err?.message);
     }
   }
 

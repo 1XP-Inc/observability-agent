@@ -48,7 +48,7 @@ async function main(): Promise<void> {
     registerStandaloneRoutes(app, { config, services, bundles });
   }
 
-  await app.listen({ host: "0.0.0.0", port: config.port });
+  await app.listen({ host: config.host, port: config.port });
 }
 
 main().catch((err) => {

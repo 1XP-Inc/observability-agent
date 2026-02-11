@@ -28,8 +28,20 @@ export async function collectStandaloneMetrics(params: {
     const ac = new AbortController();
     const timer = setTimeout(() => ac.abort(), timeoutMs);
     try {
+      const MAX_BODY = 10 * 1024 * 1024;
       const resp = await fetch(svc.metrics, { signal: ac.signal });
       const text = await resp.text();
+      if (text.length > MAX_BODY) {
+        await writer.writeRecord({
+          type: "metrics_text",
+          service: svc.name,
+          url: svc.metrics,
+          ts,
+          ok: false,
+          error: `response_too_large (${text.length} bytes)`,
+        });
+        continue;
+      }
       if (!resp.ok) {
         await writer.writeRecord({
           type: "metrics_text",

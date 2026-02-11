@@ -15,7 +15,7 @@ export async function runStandaloneBundle(params: {
   const { config, services, job } = params;
   const req = job.params;
 
-  await fs.mkdir(config.bundleDir, { recursive: true });
+  await fs.mkdir(config.bundleDir, { recursive: true, mode: 0o700 });
   const artifactPath = path.join(config.bundleDir, `${job.bundleId}.ndjson.gz`);
 
   const writer = createNdjsonGzipWriter(artifactPath);
