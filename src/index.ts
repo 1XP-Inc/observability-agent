@@ -8,9 +8,19 @@ import type { StandaloneNormalizedRequest } from "./standalone/types";
 async function main(): Promise<void> {
   const config = loadConfig();
 
-  const app = Fastify({ logger: true, bodyLimit: 1_000_000 });
+  const app = Fastify({
+    logger: true,
+    bodyLimit: 1_000_000,
+    trustProxy: config.trustProxy,
+  });
 
   app.get("/healthz", async () => ({ ok: true }));
+
+  if (config.allowedIps) {
+    const { parseAllowList, ipFilterHook } = await import("./ip-filter");
+    app.addHook("onRequest", ipFilterHook(parseAllowList(config.allowedIps)));
+  }
+
   app.addHook("onRequest", authHook(config));
 
   if (config.mode === "k8s") {

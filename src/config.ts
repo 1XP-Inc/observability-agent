@@ -25,6 +25,9 @@ export type OAConfig = {
   maxInflightBundles: number;
   hardLimits: OALimits;
 
+  allowedIps?: string[];
+  trustProxy?: boolean | string;
+
   services?: ServiceDef[];
 
   defaults: {
@@ -134,6 +137,14 @@ export function loadConfig(): OAConfig {
   const bundleTtlMinutes = envInt("OA_BUNDLE_TTL_MINUTES", 60);
   const cleanupIntervalMs = envInt("OA_CLEANUP_INTERVAL_MS", 120_000);
 
+  const allowedIpsRaw = envString("OA_ALLOWED_IPS");
+  const allowedIps = allowedIpsRaw
+    ? allowedIpsRaw.split(",").map(s => s.trim()).filter(Boolean)
+    : undefined;
+
+  const trustProxyRaw = envString("OA_TRUST_PROXY");
+  const trustProxy = trustProxyRaw === "true" ? true : trustProxyRaw ?? undefined;
+
   const services = parseServices();
   if (mode === "standalone" && !services) {
     throw new Error("OA_SERVICES is required in standalone mode");
@@ -152,6 +163,9 @@ export function loadConfig(): OAConfig {
 
     maxInflightBundles: envInt("OA_MAX_INFLIGHT_BUNDLES", 5),
     hardLimits,
+
+    allowedIps,
+    trustProxy,
 
     services,
 

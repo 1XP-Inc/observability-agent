@@ -13,7 +13,7 @@ function pathnameFromRequest(req: FastifyRequest): string {
   }
 }
 
-function isSkippablePath(req: FastifyRequest): boolean {
+export function isSkippablePath(req: FastifyRequest): boolean {
   const path = pathnameFromRequest(req);
   return (
     path === "/healthz" ||

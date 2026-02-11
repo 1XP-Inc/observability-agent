@@ -13,6 +13,8 @@ export function createMockConfig(overrides?: Partial<OAConfig>): OAConfig {
     bundleTtlMs: 60 * 60_000,
     cleanupIntervalMs: 120_000,
     maxInflightBundles: 5,
+    allowedIps: undefined,
+    trustProxy: undefined,
     hardLimits: {
       maxPods: 20,
       maxTotalLogLines: 50_000,

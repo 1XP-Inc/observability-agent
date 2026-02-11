@@ -139,6 +139,8 @@ All configuration is via environment variables with sensible defaults:
 | `OA_MAX_TOTAL_LOG_LINES` | `50000` | Hard limit on total log lines |
 | `OA_SINCE_SECONDS_MAX` | `3600` | Max time window (1 hour) |
 | `OA_METRICS_TIMEOUT_MS` | `2000` | Per-target metrics scrape timeout |
+| `OA_ALLOWED_IPS` | *(none)* | Comma-separated IP/CIDR allowlist (e.g. `10.0.0.1,192.168.0.0/16`) |
+| `OA_TRUST_PROXY` | *(none)* | Fastify `trustProxy` — `"true"` to trust all proxies, or a specific address/CIDR |
 
 ### K8s Only
 
@@ -183,6 +185,7 @@ src/
 ├── index.ts             # Fastify app bootstrap, mode branching
 ├── config.ts            # Environment-based configuration + mode detection
 ├── auth.ts              # JWT authentication hook
+├── ip-filter.ts         # IP allowlist filter hook
 ├── types.ts             # Shared type definitions
 ├── validate.ts          # K8s request validation + normalization
 ├── k8s.ts               # K8s client factory

@@ -398,4 +398,74 @@ describe("loadConfig", () => {
     process.env.OA_SERVICES = '[{"name":123}]';
     expect(() => loadConfig()).toThrow("OA_SERVICES[0].name is required");
   });
+
+  // --- OA_ALLOWED_IPS 파싱 ---
+  describe("OA_ALLOWED_IPS", () => {
+    it("미설정 시 undefined", () => {
+      process.env.OA_JWT_SECRET = "s";
+      expect(loadConfig().allowedIps).toBeUndefined();
+    });
+
+    it("빈 문자열이면 undefined", () => {
+      process.env.OA_JWT_SECRET = "s";
+      process.env.OA_ALLOWED_IPS = "";
+      expect(loadConfig().allowedIps).toBeUndefined();
+    });
+
+    it("단일 IP를 파싱한다", () => {
+      process.env.OA_JWT_SECRET = "s";
+      process.env.OA_ALLOWED_IPS = "10.0.0.1";
+      expect(loadConfig().allowedIps).toEqual(["10.0.0.1"]);
+    });
+
+    it("컴마 구분 리스트를 파싱한다", () => {
+      process.env.OA_JWT_SECRET = "s";
+      process.env.OA_ALLOWED_IPS = "10.0.0.1,192.168.0.0/16,203.0.113.42";
+      expect(loadConfig().allowedIps).toEqual(["10.0.0.1", "192.168.0.0/16", "203.0.113.42"]);
+    });
+
+    it("앞뒤 공백을 trim한다", () => {
+      process.env.OA_JWT_SECRET = "s";
+      process.env.OA_ALLOWED_IPS = " 10.0.0.1 , 10.0.0.2 ";
+      expect(loadConfig().allowedIps).toEqual(["10.0.0.1", "10.0.0.2"]);
+    });
+
+    it("빈 항목을 무시한다", () => {
+      process.env.OA_JWT_SECRET = "s";
+      process.env.OA_ALLOWED_IPS = "10.0.0.1,,10.0.0.2,";
+      expect(loadConfig().allowedIps).toEqual(["10.0.0.1", "10.0.0.2"]);
+    });
+  });
+
+  // --- OA_TRUST_PROXY 파싱 ---
+  describe("OA_TRUST_PROXY", () => {
+    it("미설정 시 undefined", () => {
+      process.env.OA_JWT_SECRET = "s";
+      expect(loadConfig().trustProxy).toBeUndefined();
+    });
+
+    it('"true" 이면 boolean true', () => {
+      process.env.OA_JWT_SECRET = "s";
+      process.env.OA_TRUST_PROXY = "true";
+      expect(loadConfig().trustProxy).toBe(true);
+    });
+
+    it("문자열 값은 그대로 전달한다", () => {
+      process.env.OA_JWT_SECRET = "s";
+      process.env.OA_TRUST_PROXY = "127.0.0.1";
+      expect(loadConfig().trustProxy).toBe("127.0.0.1");
+    });
+
+    it("CIDR 문자열도 그대로 전달한다", () => {
+      process.env.OA_JWT_SECRET = "s";
+      process.env.OA_TRUST_PROXY = "10.0.0.0/8";
+      expect(loadConfig().trustProxy).toBe("10.0.0.0/8");
+    });
+
+    it("빈 문자열이면 undefined", () => {
+      process.env.OA_JWT_SECRET = "s";
+      process.env.OA_TRUST_PROXY = "";
+      expect(loadConfig().trustProxy).toBeUndefined();
+    });
+  });
 });
