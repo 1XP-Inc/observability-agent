@@ -6,10 +6,10 @@ OA exposes a simple REST API. AI agents (or any HTTP client) authenticate with a
 
 ```mermaid
 flowchart LR
-    A["AI Agent\n(client)"] -- "JWT" --> B["OA"]
+    A["AI Agent<br/>(client)"] -- "JWT" --> B["OA"]
     B -- "ndjson.gz" --> A
-    B -- "K8s API\nPod scrape" --> C["Cluster"]
-    B -- "File tail\nURL scrape" --> D["VM / Bare metal"]
+    B -- "K8s API<br/>Pod scrape" --> C["Cluster"]
+    B -- "File tail<br/>URL scrape" --> D["VM / Bare metal"]
 ```
 
 ---
