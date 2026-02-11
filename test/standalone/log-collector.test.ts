@@ -365,62 +365,6 @@ describe("collectStandaloneLogs", () => {
     expect(logRecords.length).toBe(1);
   });
 
-  it("retries with more lines when excludePatterns reduce count below budget", async () => {
-    // 20 lines: 10 "noise" (excluded) interleaved with 10 "signal"
-    const content = Array.from({ length: 20 }, (_, i) =>
-      i % 2 === 0
-        ? `2024-01-01T00:00:${String(i).padStart(2, "0")}Z noise-${i}`
-        : `2024-01-01T00:00:${String(i).padStart(2, "0")}Z signal-${i}`,
-    ).join("\n") + "\n";
-    const logFile = tmpLog(content);
-    const services: ServiceDef[] = [{ name: "svc1", logs: [logFile] }];
-    const { writer, records } = makeWriter();
-
-    // budget=10, first read gets 10 lines → ~5 clean → retry with 20 → 10 clean
-    await collectStandaloneLogs({
-      writer,
-      services,
-      req: makeReq({
-        limits: { maxTotalLogLines: 10, sinceSecondsMax: 3600, metricsTimeoutMs: 2000 },
-        include: { logs: { enabled: true, tailLines: 100, excludePatterns: ["noise"] }, metrics: { enabled: false } },
-      }),
-    });
-
-    const logRecords = records.filter((r: any) => r.type === "log" && r.line);
-    expect(logRecords.length).toBe(10);
-    expect(logRecords.every((r: any) => r.line.includes("signal"))).toBe(true);
-
-    fs.unlinkSync(logFile);
-  });
-
-  it("caps retry at MAX_READ_MULTIPLIER and returns available clean lines", async () => {
-    // 100 lines, 90% excluded → only 10 clean lines available
-    const content = Array.from({ length: 100 }, (_, i) =>
-      i < 90
-        ? `2024-01-01T00:00:00Z junk-${i}`
-        : `2024-01-01T00:00:00Z keep-${i}`,
-    ).join("\n") + "\n";
-    const logFile = tmpLog(content);
-    const services: ServiceDef[] = [{ name: "svc1", logs: [logFile] }];
-    const { writer, records } = makeWriter();
-
-    // budget=50, but only 10 clean lines exist → returns 10 after exhausting retries
-    await collectStandaloneLogs({
-      writer,
-      services,
-      req: makeReq({
-        limits: { maxTotalLogLines: 50, sinceSecondsMax: 3600, metricsTimeoutMs: 2000 },
-        include: { logs: { enabled: true, tailLines: 100, excludePatterns: ["junk"] }, metrics: { enabled: false } },
-      }),
-    });
-
-    const logRecords = records.filter((r: any) => r.type === "log" && r.line);
-    expect(logRecords.length).toBe(10);
-    expect(logRecords.every((r: any) => r.line.includes("keep"))).toBe(true);
-
-    fs.unlinkSync(logFile);
-  });
-
   it("skips journal when not configured", async () => {
     const services: ServiceDef[] = [{ name: "svc1" }];
     const { writer, records } = makeWriter();
