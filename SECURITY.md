@@ -2,20 +2,34 @@
 
 ## Supported Versions
 
-Use this section to tell people about which versions of your project are
-currently being supported with security updates.
+OA is currently pre-1.0. Security fixes are provided for the latest `0.1.x`
+release line and the `main` branch.
 
-| Version | Supported          |
-| ------- | ------------------ |
-| 5.1.x   | :white_check_mark: |
-| 5.0.x   | :x:                |
-| 4.0.x   | :white_check_mark: |
-| < 4.0   | :x:                |
+| Version | Supported |
+| ------- | --------- |
+| `0.1.x` | Yes |
+| `< 0.1` | No |
 
 ## Reporting a Vulnerability
 
-Use this section to tell people how to report a vulnerability.
+Please report suspected vulnerabilities privately through GitHub Security
+Advisories:
 
-Tell them where to go, how often they can expect to get an update on a
-reported vulnerability, what to expect if the vulnerability is accepted or
-declined, etc.
+https://github.com/1XP-Inc/observability-agent/security/advisories/new
+
+Do not open a public issue with exploit details, tokens, logs, or private
+infrastructure information. Include a concise description, affected version or
+commit, reproduction steps, impact, and any suggested mitigation.
+
+## Security Notes
+
+- OA is a read-only gateway for target systems, but bundle artifacts contain
+  copied logs and metrics and should be treated as sensitive.
+- JWTs use HS256 shared-secret verification and require an `exp` claim. Keep
+  `OA_JWT_SECRET` at least 32 random characters and rotate it if exposed.
+- `OA_TRUST_PROXY=true` trusts all forwarded IP headers. Use a concrete trusted
+  proxy address or CIDR when the listener is reachable by clients.
+- Standalone file, journal, and metrics sources are operator-configured through
+  `OA_SERVICES`. OA does not block private network metrics URLs or elevate OS
+  permissions for logs.
+- K8s access is bounded by the service account RBAC granted to the process.

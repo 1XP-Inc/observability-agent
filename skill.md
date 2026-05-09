@@ -14,7 +14,8 @@ OA runs in one of two modes, auto-detected by the presence of `KUBERNETES_SERVIC
 | **Standalone** | `KUBERNETES_SERVICE_HOST` absent | Services (`OA_SERVICES` env) | File tail + journalctl | None | Direct URL scrape |
 
 ## Base
-- **Auth**: `Authorization: Bearer <JWT>` (required on all requests)
+- **Auth**: `Authorization: Bearer <JWT>` (required on protected API requests)
+- **No-auth endpoints**: `/healthz`, `/livez`, `/readyz`, `/skill.md`, `/.well-known/skill.md`
 
 ## Auth/JWT
 OA verifies JWTs using an **HS256 shared secret**.
@@ -156,7 +157,9 @@ Standalone rules:
 - `kind` is `"services"` (auto-inferred when a services array is present)
 - `events` not supported in standalone
 - `previous`, `timestamps` options not available (file tail always reads latest N lines)
-- Logs are collected via tail from file paths configured per service
+- Logs are collected via `tail` from file paths configured per service and `journalctl -u` for configured systemd units
+- Clients cannot request arbitrary file paths or journal units; only registered `OA_SERVICES` entries are available
+- OA uses the current process OS permissions and does not elevate privileges
 
 ### Log Line Exclude Filter (excludePatterns)
 `include.logs.excludePatterns: string[]` removes lines by substring match (like `grep -v`).
@@ -204,6 +207,7 @@ Standalone log skip reasons:
 - `file_not_found`: log file does not exist
 - `read_error`: file read failed (permissions, etc.)
 - `journalctl_not_found`: journalctl binary not found
+- `journal_permission_denied`: journalctl reported insufficient journal permissions
 - `journal_read_error`: journalctl execution failed (permissions, etc.)
 
 Standalone metrics status:
@@ -212,8 +216,8 @@ Standalone metrics status:
 |--------|---------|--------|
 | Success | Scrape OK | `ok: true`, `content: "# HELP ..."` |
 | Normal skip | No metrics URL configured | `skipped: true`, `reason: "no_metrics_url"` |
-| Timeout | Response timed out | `ok: false`, `error: "timeout"` |
-| Failure | Connection failed | `ok: false`, `error: "fetch_failed"` |
+| Timeout | Response timed out | `ok: false`, `error: "timeout after 2000ms"` |
+| Failure | Connection failed | `ok: false`, `error: "fetch_failed: ECONNREFUSED"` |
 
 ### K8s Previous Logs
 If a pod has not restarted, `previous=true` logs may not exist and K8s may return 400/404. This is normal and must not fail the bundle.
@@ -302,7 +306,7 @@ OA writes a skip record in this case:
 Standalone mode defines services via the `OA_SERVICES` env:
 
 ```bash
-export OA_JWT_SECRET="..."
+export OA_JWT_SECRET="replace-with-at-least-32-random-chars"
 export OA_SERVICES='[
   {"name":"solana-validator","logs":["/var/log/solana/validator.log"],"metrics":"http://localhost:9090/metrics"},
   {"name":"rpc-node","logs":["/var/log/solana/rpc.log"]}
@@ -317,6 +321,16 @@ Service definition fields:
 | `logs` | No | Array of log file paths to collect |
 | `journal` | No | systemd unit name (journalctl log collection) |
 | `metrics` | No | Prometheus metrics URL |
+
+Standalone permission model:
+- File and journal readability depends on the OS permissions of the OA process.
+- OA does not create users, join system groups, run sudo, or bypass systemd journal permissions.
+- Full system journal visibility is possible only when the existing process account can already read those journals.
+- Metrics URLs are operator-provided trusted configuration and may point at localhost or private networks for compatibility.
+
+Standalone time windows:
+- Relative file log requests read the latest configured line budget with `tail`; `sinceSeconds` does not seek historical file contents.
+- Absolute file and journal requests post-filter lines with parseable timestamps and keep lines without parseable timestamps.
 
 ---
 

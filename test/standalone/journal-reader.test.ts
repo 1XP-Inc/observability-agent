@@ -135,6 +135,17 @@ describe("readJournalLines", () => {
     ).rejects.toThrow("permission denied");
   });
 
+  it("throws EACCES when rejected process stderr contains permission hint", async () => {
+    const err = new Error("Command failed: journalctl") as NodeJS.ErrnoException & { stderr?: string };
+    err.code = "1";
+    err.stderr = "Hint: You are currently not seeing messages from other users and the system.";
+    setupError(err);
+
+    await expect(
+      readJournalLines({ unit: "nginx.service", maxLines: 100 }),
+    ).rejects.toMatchObject({ code: "EACCES" });
+  });
+
   it("throws EACCES when stderr contains permission hint", async () => {
     mockExecFileAsync.mockResolvedValue({
       stdout: "",

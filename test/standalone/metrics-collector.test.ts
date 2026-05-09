@@ -7,6 +7,7 @@ vi.mock("undici", () => ({
 import { fetch } from "undici";
 import { collectStandaloneMetrics } from "../../src/standalone/metrics-collector";
 import type { StandaloneNormalizedRequest, ServiceDef } from "../../src/standalone/types";
+import { MAX_METRICS_BODY_BYTES } from "../../src/metrics-body";
 
 function makeReq(overrides?: Partial<StandaloneNormalizedRequest>): StandaloneNormalizedRequest {
   return {
@@ -32,6 +33,22 @@ function makeWriter() {
   };
 }
 
+function streamResponse(chunks: Uint8Array[]) {
+  return {
+    ok: true,
+    status: 200,
+    body: new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (const chunk of chunks) controller.enqueue(chunk);
+        controller.close();
+      },
+    }),
+    text: vi.fn(async () => {
+      throw new Error("text fallback should not be used");
+    }),
+  };
+}
+
 describe("collectStandaloneMetrics", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -51,6 +68,21 @@ describe("collectStandaloneMetrics", () => {
       url: "http://localhost:9090/metrics",
       ok: true,
       content: "counter 42\n",
+    });
+  });
+
+  it("continues to allow private/internal metrics URLs", async () => {
+    const services: ServiceDef[] = [{ name: "svc1", metrics: "http://10.0.0.5:9090/metrics" }];
+    const { writer, records } = makeWriter();
+    (fetch as any).mockResolvedValue({ ok: true, status: 200, text: async () => "counter 42\n" });
+
+    await collectStandaloneMetrics({ writer, services, req: makeReq() });
+
+    expect(fetch).toHaveBeenCalledWith("http://10.0.0.5:9090/metrics", expect.any(Object));
+    expect(records[0]).toMatchObject({
+      service: "svc1",
+      url: "http://10.0.0.5:9090/metrics",
+      ok: true,
     });
   });
 
@@ -106,6 +138,23 @@ describe("collectStandaloneMetrics", () => {
     const err = records.filter((r: any) => r.type === "metrics_text" && r.ok === false);
     expect(err.length).toBe(1);
     expect(err[0].error).toBe("fetch_failed: ECONNREFUSED");
+  });
+
+  it("stops streaming when metrics response exceeds the 10MB limit", async () => {
+    const services: ServiceDef[] = [{ name: "svc1", metrics: "http://localhost:9090/metrics" }];
+    const { writer, records } = makeWriter();
+    const resp = streamResponse([
+      new Uint8Array(MAX_METRICS_BODY_BYTES),
+      new Uint8Array(1),
+    ]);
+    (fetch as any).mockResolvedValue(resp);
+
+    await collectStandaloneMetrics({ writer, services, req: makeReq() });
+
+    const err = records.filter((r: any) => r.type === "metrics_text" && r.ok === false);
+    expect(err.length).toBe(1);
+    expect(err[0].error).toContain("response_too_large");
+    expect(resp.text).not.toHaveBeenCalled();
   });
 
   it("handles multiple services", async () => {

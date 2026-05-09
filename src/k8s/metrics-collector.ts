@@ -3,6 +3,7 @@ import type { NdjsonGzipWriter } from "../bundle-writer";
 import { HttpError } from "../http-error";
 import type { NormalizedBundleRequest, PodRef } from "./types";
 import { isoNow, mapWithConcurrency } from "../util";
+import { MAX_METRICS_BODY_BYTES, ResponseTooLargeError, readResponseTextWithLimit } from "../metrics-body";
 
 export function isMetricsAnnotated(pod: PodRef): { enabled: boolean; port?: number; path: string } {
   const scrape = pod.annotations["prometheus.io/scrape"];
@@ -70,10 +71,12 @@ export async function collectMetrics(params: {
     const ac = new AbortController();
     const timer = setTimeout(() => ac.abort(), timeoutMs);
     try {
-      const MAX_BODY = 10 * 1024 * 1024;
       const resp = await fetch(url, { signal: ac.signal });
-      const text = await resp.text();
-      if (text.length > MAX_BODY) {
+      let text: string;
+      try {
+        text = await readResponseTextWithLimit(resp, MAX_METRICS_BODY_BYTES);
+      } catch (err) {
+        if (!(err instanceof ResponseTooLargeError)) throw err;
         await writer.writeRecord({
           type: "metrics_text",
           namespace: pod.namespace,
@@ -83,7 +86,7 @@ export async function collectMetrics(params: {
           path: ann.path,
           ts,
           ok: false,
-          error: `response_too_large (${text.length} bytes)`,
+          error: err.message,
         });
         return;
       }

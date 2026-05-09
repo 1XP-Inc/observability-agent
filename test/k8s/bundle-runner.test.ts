@@ -40,6 +40,7 @@ import { createNdjsonGzipWriter } from "../../src/bundle-writer";
 import { createMockConfig, createMockCoreV1Api, createMockPod, createMockEvent } from "../helpers";
 import { fetch } from "undici";
 import fs from "node:fs/promises";
+import { MAX_METRICS_BODY_BYTES } from "../../src/metrics-body";
 
 // ---- Helpers ----
 
@@ -94,6 +95,22 @@ function setupPodList(pods: any[]) {
 
 function setupPodLogs(text: string) {
   (readPodLog as any).mockResolvedValue(text);
+}
+
+function streamResponse(chunks: Uint8Array[]) {
+  return {
+    ok: true,
+    status: 200,
+    body: new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (const chunk of chunks) controller.enqueue(chunk);
+        controller.close();
+      },
+    }),
+    text: vi.fn(async () => {
+      throw new Error("text fallback should not be used");
+    }),
+  };
 }
 
 // ---- Tests ----
@@ -1498,6 +1515,28 @@ describe("runBundle", () => {
 
       const errRecords = records.filter((r) => r.type === "metrics_text" && r.ok === false);
       expect(errRecords.some((r) => r.error === "fetch_failed")).toBe(true);
+    });
+
+    it("response exceeding 10MB writes response_too_large record while streaming", async () => {
+      const { records } = makeWriter();
+      const pod = createMockPod({
+        namespace: "default",
+        name: "p1",
+        annotations: { "prometheus.io/scrape": "true", "prometheus.io/port": "9090" },
+      });
+      setupPodList([pod]);
+      const resp = streamResponse([
+        new Uint8Array(MAX_METRICS_BODY_BYTES),
+        new Uint8Array(1),
+      ]);
+      (fetch as any).mockResolvedValue(resp);
+
+      const job = makeJob({ params: metricsParams() });
+      await runBundle({ config, coreV1, job });
+
+      const errRecords = records.filter((r) => r.type === "metrics_text" && r.ok === false);
+      expect(errRecords.some((r) => r.error?.includes("response_too_large"))).toBe(true);
+      expect(resp.text).not.toHaveBeenCalled();
     });
 
     it("maxMetricsPods exceeded throws HttpError 400", async () => {

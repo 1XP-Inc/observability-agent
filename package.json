@@ -4,21 +4,46 @@
   "description": "OA (Observability Agent) - read-only gateway for logs, events, and metrics.",
   "license": "Apache-2.0",
   "main": "dist/index.js",
+  "files": [
+    "dist",
+    "README.md",
+    "SECURITY.md",
+    "LICENSE",
+    "skill.md"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/1XP-Inc/observability-agent.git"
+  },
+  "bugs": {
+    "url": "https://github.com/1XP-Inc/observability-agent/issues"
+  },
+  "homepage": "https://github.com/1XP-Inc/observability-agent#readme",
+  "keywords": [
+    "observability",
+    "logs",
+    "metrics",
+    "kubernetes",
+    "systemd",
+    "journalctl"
+  ],
+  "author": "1XP Inc.",
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "prepack": "npm run build"
   },
   "engines": {
     "node": ">=20"
   },
   "dependencies": {
     "@kubernetes/client-node": "^1.3.0",
-    "fastify": "^5.2.1",
+    "fastify": "^5.8.5",
     "jsonwebtoken": "^9.0.2",
-    "undici": "^7.4.0"
+    "undici": "^7.25.0"
   },
   "devDependencies": {
     "@types/jsonwebtoken": "^9.0.8",
