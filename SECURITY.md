@@ -27,6 +27,9 @@ commit, reproduction steps, impact, and any suggested mitigation.
   copied logs and metrics and should be treated as sensitive.
 - JWTs use HS256 shared-secret verification and require an `exp` claim. Keep
   `OA_JWT_SECRET` at least 32 random characters and rotate it if exposed.
+- JWT authorization claims limit namespace, service, and data-source access.
+  Use `admin: true` only for trusted operators because it permits cluster-wide
+  pod discovery and bypasses scope checks.
 - `OA_TRUST_PROXY=true` trusts all forwarded IP headers. Use a concrete trusted
   proxy address or CIDR when the listener is reachable by clients.
 - Standalone file, journal, and metrics sources are operator-configured through

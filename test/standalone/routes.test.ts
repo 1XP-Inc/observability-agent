@@ -16,16 +16,16 @@ const services: ServiceDef[] = [
   { name: "rpc-node", logs: ["/var/log/solana/rpc.log"] },
 ];
 
-function validToken() {
+function validToken(payload?: Record<string, any>) {
   return jwt.sign(
-    { sub: "test-user", exp: Math.floor(Date.now() / 1000) + 300 },
+    { sub: "test-user", exp: Math.floor(Date.now() / 1000) + 300, ...payload },
     SECRET,
     { algorithm: "HS256" },
   );
 }
 
-function authHeader() {
-  return { authorization: `Bearer ${validToken()}` };
+function authHeader(payload: Record<string, any> = { admin: true }) {
+  return { authorization: `Bearer ${validToken(payload)}` };
 }
 
 function createMockBundleManager() {
@@ -97,6 +97,18 @@ describe("GET /v1/services", () => {
     expect(res.statusCode).toBe(401);
     await app.close();
   });
+
+  it("filters services and redacts sensitive fields for scoped tokens", async () => {
+    const { app } = buildApp();
+    const res = await app.inject({
+      method: "GET",
+      url: "/v1/services",
+      headers: authHeader({ allowedServices: ["rpc-*"], capabilities: ["logs"] }),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().items).toEqual([{ name: "rpc-node" }]);
+    await app.close();
+  });
 });
 
 describe("POST /v1/bundles (standalone)", () => {
@@ -119,6 +131,53 @@ describe("POST /v1/bundles (standalone)", () => {
     expect(res.json().bundleId).toBe("bnd_standalone_123");
     expect(res.json().status).toBe("queued");
     expect(bundleManager.create).toHaveBeenCalledOnce();
+    await app.close();
+  });
+
+  it("creates a bundle for a matching service scope and capabilities", async () => {
+    const bundleManager = createMockBundleManager();
+    const { app } = buildApp({ bundleManagerOverride: bundleManager });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/bundles",
+      headers: authHeader({ allowedServices: ["solana-*"], capabilities: ["logs", "metrics"] }),
+      payload: validBody,
+    });
+    expect(res.statusCode).toBe(200);
+    expect(bundleManager.create).toHaveBeenCalledOnce();
+    await app.close();
+  });
+
+  it("rejects a bundle for a service outside the token scope", async () => {
+    const bundleManager = createMockBundleManager();
+    const { app } = buildApp({ bundleManagerOverride: bundleManager });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/bundles",
+      headers: authHeader({ allowedServices: ["rpc-*"], capabilities: ["logs", "metrics"] }),
+      payload: validBody,
+    });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error).toBe("forbidden");
+    expect(bundleManager.create).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it("rejects a bundle when requested capability is missing", async () => {
+    const bundleManager = createMockBundleManager();
+    const { app } = buildApp({ bundleManagerOverride: bundleManager });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/bundles",
+      headers: authHeader({ allowedServices: ["solana-*"], capabilities: ["logs"] }),
+      payload: { ...validBody, include: { logs: { enabled: true }, metrics: { enabled: true } } },
+    });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error).toBe("forbidden");
+    expect(bundleManager.create).not.toHaveBeenCalled();
     await app.close();
   });
 
@@ -247,6 +306,41 @@ describe("GET /v1/bundles/:bundleId/download (standalone)", () => {
       headers: authHeader(),
     });
     expect(res.statusCode).toBe(409);
+    await app.close();
+  });
+
+  it("returns 403 when token cannot access the bundle service scope", async () => {
+    const bundleManager = createMockBundleManager();
+    bundleManager.jobs.set("bnd_scope", {
+      bundleId: "bnd_scope",
+      status: "done",
+      createdAt: "",
+      updatedAt: "",
+      expiresAt: "",
+      params: {
+        timeWindow: { kind: "relative", sinceSeconds: 300 },
+        target: { kind: "services", services: ["solana-validator"] },
+        include: {
+          logs: { enabled: true, excludePatterns: [] },
+          metrics: { enabled: false },
+        },
+        limits: {
+          maxTotalLogLines: 50_000,
+          sinceSecondsMax: 3600,
+          metricsTimeoutMs: 2000,
+        },
+      },
+      artifactPath: tmpFile,
+    });
+    const { app } = buildApp({ bundleManagerOverride: bundleManager });
+
+    const res = await app.inject({
+      method: "GET",
+      url: "/v1/bundles/bnd_scope/download",
+      headers: authHeader({ allowedServices: ["rpc-*"], capabilities: ["logs"] }),
+    });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error).toBe("forbidden");
     await app.close();
   });
 

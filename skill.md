@@ -25,9 +25,27 @@ JWT rules:
 - Algorithm: **HS256**
 - `exp` claim **required** (recommended 5–15 min)
 - Missing or invalid JWT → **401**
+- Missing namespace/service/capability scope → **403**
 
 > **The client (AI Agent) signs an HS256 JWT using `OA_JWT_SECRET` (env) and sends it with each request.**
 > The secret is used only in runtime memory — never expose it in logs, files, or output.
+
+Authorization claims:
+```json
+{
+  "sub": "agent-01",
+  "allowedNamespaces": ["prod", "monitoring"],
+  "allowedServices": ["validator-*"],
+  "capabilities": ["pods", "logs", "events", "metrics"],
+  "admin": false
+}
+```
+
+- K8s pod discovery requires `pods` capability and namespace scope.
+- `ns=*` requires `admin: true`.
+- Bundle create/status/download enforce the bundle target scope and requested capabilities.
+- Standalone `allowedServices` entries can use `*` wildcards.
+- Non-admin discovery responses are redacted.
 ---
 
 ## Primary Workflow (bundle-first)
@@ -43,21 +61,21 @@ JWT rules:
 
 ### K8s Mode: Pod Search
 
-`GET /v1/pods?ns=*&q=<substring>`
+`GET /v1/pods?ns=<namespace>&q=<substring>`
 
-- `ns`: namespace (`*` = all)
+- `ns`: namespace (`*` = all, admin only)
 - `selector`: label selector
 - `q`: pod name substring search
 
-Response: namespace, name, podIP, labels, annotations, containers[], status
+Response: namespace, name, labels, containers[], status. Admin responses also include podIP, annotations, and nodeName.
 
 ### Standalone Mode: Service List
 
 `GET /v1/services`
 
-Returns registered services configured via `OA_SERVICES` env.
+Returns registered services configured via `OA_SERVICES` env, filtered by JWT service scope.
 
-Response example:
+Admin response example:
 ```json
 {
   "items": [

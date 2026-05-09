@@ -21,7 +21,7 @@ flowchart LR
 - **Logs** — K8s container logs, local file tail, or journalctl (systemd), with timestamp parsing, time-window filtering, and exclude patterns
 - **Events** — K8s events scoped to target pods (K8s mode only)
 - **Metrics** — Prometheus scraping from pod annotations (K8s) or configured URLs (standalone)
-- **JWT auth** — HS256 shared-secret authentication with mandatory `exp` claim
+- **JWT authz** — HS256 shared-secret authentication with mandatory `exp` claim and JWT scope claims
 - **Hard limits** — configurable caps on pods, log lines, and inflight bundles
 - **Target read-only** — never modifies cluster or server state; writes only local bundle artifacts under `OA_BUNDLE_DIR`
 
@@ -65,6 +65,25 @@ npm start
 | `GET` | `/v1/bundles/:id/download` | Download completed bundle (`.ndjson.gz`) |
 
 All non-health, non-skill endpoints require JWT auth. `OA_ALLOWED_IPS` uses the same exception list, so health and skill endpoints remain unauthenticated and outside the IP allowlist filter by design.
+
+Protected endpoints also enforce JWT authorization claims:
+
+```json
+{
+  "sub": "agent-01",
+  "allowedNamespaces": ["prod", "monitoring"],
+  "allowedServices": ["validator-*"],
+  "capabilities": ["pods", "logs", "events", "metrics"],
+  "admin": false
+}
+```
+
+- K8s pod discovery requires `capabilities: ["pods"]` and an allowed namespace.
+- K8s `ns=*` is allowed only with `admin: true`.
+- Bundle create/status/download checks the same namespace or service scope as the bundle target.
+- Bundle data sources require matching capabilities: `logs`, `events`, and/or `metrics`.
+- Standalone service scopes support `*` wildcards in `allowedServices`.
+- Non-admin pod/service discovery responses omit sensitive fields such as pod IPs, annotations, node names, log paths, journal units, and metrics URLs.
 
 ### K8s Mode
 

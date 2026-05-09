@@ -7,9 +7,38 @@ import { HttpError } from "../http-error";
 import { loadSkillMarkdown } from "../skill";
 import type { ServiceDef, StandaloneNormalizedRequest } from "./types";
 import { normalizeStandaloneBundleRequest } from "./validate";
+import {
+  assertCapabilities,
+  assertServicesAllowed,
+  isServiceAllowed,
+  principalFromRequest,
+  type Capability,
+  type Principal,
+} from "../authorization";
 
 function hasString(v: unknown): v is string {
   return typeof v === "string" && v.length > 0;
+}
+
+function sendHttpError(reply: any, err: HttpError): void {
+  reply.code(err.statusCode).send({ error: err.message, details: err.details });
+}
+
+function bundleCapabilities(params: StandaloneNormalizedRequest): Capability[] {
+  const capabilities: Capability[] = [];
+  if (params.include.logs.enabled) capabilities.push("logs");
+  if (params.include.metrics.enabled) capabilities.push("metrics");
+  return capabilities;
+}
+
+function targetServiceNames(params: StandaloneNormalizedRequest, services: ServiceDef[]): string[] {
+  return params.target.kind === "all" ? services.map((s) => s.name) : params.target.services;
+}
+
+function authorizeBundle(principal: Principal, params: StandaloneNormalizedRequest, services: ServiceDef[]): void {
+  if (principal.admin) return;
+  assertCapabilities(principal, bundleCapabilities(params));
+  assertServicesAllowed(principal, targetServiceNames(params, services));
 }
 
 export function registerStandaloneRoutes(
@@ -34,24 +63,30 @@ export function registerStandaloneRoutes(
     reply.send(md);
   });
 
-  app.get("/v1/services", async (_req, reply) => {
-    const items = services.map((s) => ({
-      name: s.name,
-      logs: s.logs ?? [],
-      journal: s.journal ?? null,
-      metrics: s.metrics ?? null,
-    }));
+  app.get("/v1/services", async (req, reply) => {
+    const principal = principalFromRequest(req);
+    const visibleServices = principal.admin ? services : services.filter((s) => isServiceAllowed(principal, s.name));
+    const items = visibleServices.map((s) => {
+      const item: Record<string, unknown> = { name: s.name };
+      if (principal.admin) {
+        item.logs = s.logs ?? [];
+        item.journal = s.journal ?? null;
+        item.metrics = s.metrics ?? null;
+      }
+      return item;
+    });
     reply.send({ items });
   });
 
   app.post("/v1/bundles", async (req, reply) => {
     try {
       const normalized = normalizeStandaloneBundleRequest(req.body, config, services);
+      authorizeBundle(principalFromRequest(req), normalized, services);
       const job = await bundles.create(normalized);
       reply.send({ bundleId: job.bundleId, status: job.status });
     } catch (err: any) {
       if (err instanceof HttpError) {
-        reply.code(err.statusCode).send({ error: err.message, details: err.details });
+        sendHttpError(reply, err);
         return;
       }
       reply.code(500).send({ error: "internal_error" });
@@ -70,6 +105,15 @@ export function registerStandaloneRoutes(
     if (!job) {
       reply.code(404).send({ error: "bundle_not_found" });
       return;
+    }
+    try {
+      authorizeBundle(principalFromRequest(req), job.params, services);
+    } catch (err: any) {
+      if (err instanceof HttpError) {
+        sendHttpError(reply, err);
+        return;
+      }
+      throw err;
     }
     const artifact = bundles.getArtifact(bundleId);
     reply.send({
@@ -93,6 +137,15 @@ export function registerStandaloneRoutes(
     if (!job) {
       reply.code(404).send({ error: "bundle_not_found" });
       return;
+    }
+    try {
+      authorizeBundle(principalFromRequest(req), job.params, services);
+    } catch (err: any) {
+      if (err instanceof HttpError) {
+        sendHttpError(reply, err);
+        return;
+      }
+      throw err;
     }
     if (job.status !== "done" || !job.artifactPath) {
       reply.code(409).send({ error: "bundle_not_ready" });
