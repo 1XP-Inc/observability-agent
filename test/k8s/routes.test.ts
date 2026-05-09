@@ -7,7 +7,8 @@ import path from "node:path";
 import { authHook } from "../../src/auth";
 import { HttpError } from "../../src/http-error";
 import { registerRoutes } from "../../src/k8s/routes";
-import type { BundleJob, BundleArtifact, NormalizedBundleRequest } from "../../src/types";
+import type { BundleJob, BundleArtifact } from "../../src/types";
+import type { NormalizedBundleRequest } from "../../src/k8s/types";
 import { createMockConfig, createMockCoreV1Api, createMockPod } from "../helpers";
 
 // ---------------------------------------------------------------------------
@@ -30,8 +31,8 @@ function validToken(payload?: Record<string, any>) {
   );
 }
 
-function authHeader() {
-  return { authorization: `Bearer ${validToken()}` };
+function authHeader(payload: Record<string, any> = { admin: true }) {
+  return { authorization: `Bearer ${validToken(payload)}` };
 }
 
 // Mock bundle manager
@@ -167,6 +168,66 @@ describe("GET /v1/pods", () => {
     await app.close();
   });
 
+  it("rejects ns=* for scoped non-admin tokens", async () => {
+    const coreV1 = createMockCoreV1Api();
+    const { app } = buildApp({ coreV1Override: coreV1 });
+    const res = await app.inject({
+      method: "GET",
+      url: "/v1/pods?ns=*",
+      headers: authHeader({ allowedNamespaces: ["prod"], capabilities: ["pods"] }),
+    });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error).toBe("forbidden");
+    expect((coreV1 as any).listPodForAllNamespaces).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it("allows ns=* when scoped token explicitly allows all namespaces", async () => {
+    const coreV1 = createMockCoreV1Api();
+    const pod = createMockPod({ namespace: "prod", name: "pod-1" });
+    (coreV1 as any).listPodForAllNamespaces.mockResolvedValue({ body: { items: [pod] } });
+    const { app } = buildApp({ coreV1Override: coreV1 });
+    const res = await app.inject({
+      method: "GET",
+      url: "/v1/pods?ns=*",
+      headers: authHeader({ allowedNamespaces: ["*"], capabilities: ["pods"] }),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().items).toHaveLength(1);
+    expect((coreV1 as any).listPodForAllNamespaces).toHaveBeenCalled();
+    await app.close();
+  });
+
+  it("allows namespace wildcard patterns for scoped tokens", async () => {
+    const coreV1 = createMockCoreV1Api();
+    const pod = createMockPod({ namespace: "prod-a", name: "pod-1" });
+    (coreV1 as any).listNamespacedPod.mockResolvedValue({ body: { items: [pod] } });
+    const { app } = buildApp({ coreV1Override: coreV1 });
+    const res = await app.inject({
+      method: "GET",
+      url: "/v1/pods?ns=prod-a",
+      headers: authHeader({ allowedNamespaces: ["prod-*"], capabilities: ["pods"] }),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().items).toHaveLength(1);
+    expect((coreV1 as any).listNamespacedPod).toHaveBeenCalled();
+    await app.close();
+  });
+
+  it("rejects pods listing without pods capability", async () => {
+    const coreV1 = createMockCoreV1Api();
+    const { app } = buildApp({ coreV1Override: coreV1 });
+    const res = await app.inject({
+      method: "GET",
+      url: "/v1/pods?ns=prod",
+      headers: authHeader({ allowedNamespaces: ["prod"], capabilities: ["logs"] }),
+    });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error).toBe("forbidden");
+    expect((coreV1 as any).listNamespacedPod).not.toHaveBeenCalled();
+    await app.close();
+  });
+
   it("defaults to ns=* (listPodsAllNamespaces) when no query params", async () => {
     const coreV1 = createMockCoreV1Api();
     const pod1 = createMockPod({ namespace: "ns-a", name: "pod-1" });
@@ -184,6 +245,28 @@ describe("GET /v1/pods", () => {
     expect(body.items[0].namespace).toBe("ns-a");
     expect(body.items[0].name).toBe("pod-1");
     expect((coreV1 as any).listPodForAllNamespaces).toHaveBeenCalled();
+    await app.close();
+  });
+
+  it("preserves full access for legacy tokens without authorization claims", async () => {
+    const coreV1 = createMockCoreV1Api();
+    const pod = createMockPod({ namespace: "ns-a", name: "pod-1" });
+    (coreV1 as any).listPodForAllNamespaces.mockResolvedValue({ body: { items: [pod] } });
+
+    const { app } = buildApp({ coreV1Override: coreV1 });
+    const res = await app.inject({
+      method: "GET",
+      url: "/v1/pods",
+      headers: { authorization: `Bearer ${validToken({})}` },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().items[0]).toMatchObject({
+      namespace: "ns-a",
+      name: "pod-1",
+      podIP: pod.status?.podIP,
+      annotations: pod.metadata?.annotations,
+      nodeName: pod.spec?.nodeName,
+    });
     await app.close();
   });
 
@@ -291,6 +374,35 @@ describe("GET /v1/pods", () => {
     expect(item.ready).toBe(true);
     expect(item.nodeName).toBe("node-5");
     expect(item.phase).toBe("Running");
+    await app.close();
+  });
+
+  it("redacts admin-only pod fields for scoped tokens", async () => {
+    const coreV1 = createMockCoreV1Api();
+    const pod = createMockPod({
+      namespace: "prod",
+      name: "web-server",
+      podIP: "10.1.2.3",
+      labels: { app: "web" },
+      annotations: { secret: "value" },
+      nodeName: "node-5",
+    });
+    (coreV1 as any).listNamespacedPod.mockResolvedValue({ body: { items: [pod] } });
+
+    const { app } = buildApp({ coreV1Override: coreV1 });
+    const res = await app.inject({
+      method: "GET",
+      url: "/v1/pods?ns=prod",
+      headers: authHeader({ allowedNamespaces: ["prod"], capabilities: ["pods"] }),
+    });
+    expect(res.statusCode).toBe(200);
+    const item = res.json().items[0];
+    expect(item.namespace).toBe("prod");
+    expect(item.name).toBe("web-server");
+    expect(item.labels).toEqual({ app: "web" });
+    expect(item).not.toHaveProperty("podIP");
+    expect(item).not.toHaveProperty("annotations");
+    expect(item).not.toHaveProperty("nodeName");
     await app.close();
   });
 
@@ -437,6 +549,72 @@ describe("POST /v1/bundles", () => {
     expect(body.bundleId).toBe("bnd_test123");
     expect(body.status).toBe("queued");
     expect(bundleManager.create).toHaveBeenCalledOnce();
+    await app.close();
+  });
+
+  it("creates a selector bundle for a matching scoped token with pods capability", async () => {
+    const bundleManager = createMockBundleManager();
+    const { app } = buildApp({ bundleManagerOverride: bundleManager });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/bundles",
+      headers: authHeader({ allowedNamespaces: ["default"], capabilities: ["pods", "logs", "events", "metrics"] }),
+      payload: validBundleBody,
+    });
+    expect(res.statusCode).toBe(200);
+    expect(bundleManager.create).toHaveBeenCalledOnce();
+    await app.close();
+  });
+
+  it("rejects selector bundles when pods capability is missing", async () => {
+    const bundleManager = createMockBundleManager();
+    const { app } = buildApp({ bundleManagerOverride: bundleManager });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/bundles",
+      headers: authHeader({ allowedNamespaces: ["default"], capabilities: ["logs", "events", "metrics"] }),
+      payload: validBundleBody,
+    });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error).toBe("forbidden");
+    expect(bundleManager.create).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it("rejects namespace wildcard bundles for scoped non-admin tokens", async () => {
+    const bundleManager = createMockBundleManager();
+    const { app } = buildApp({ bundleManagerOverride: bundleManager });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/bundles",
+      headers: authHeader({ allowedNamespaces: ["prod"], capabilities: ["pods", "logs", "events", "metrics"] }),
+      payload: { target: { namespace: "*", selector: "app=web" } },
+    });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error).toBe("forbidden");
+    expect(bundleManager.create).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it("rejects bundles when requested capability is missing", async () => {
+    const bundleManager = createMockBundleManager();
+    const { app } = buildApp({ bundleManagerOverride: bundleManager });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/bundles",
+      headers: authHeader({ allowedNamespaces: ["default"], capabilities: ["pods", "logs"] }),
+      payload: {
+        ...validBundleBody,
+        include: { logs: { enabled: true }, events: { enabled: false }, metrics: { enabled: true } },
+      },
+    });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error).toBe("forbidden");
+    expect(bundleManager.create).not.toHaveBeenCalled();
     await app.close();
   });
 
@@ -685,6 +863,46 @@ describe("GET /v1/bundles/:bundleId/download", () => {
     });
     expect(res.statusCode).toBe(409);
     expect(res.json().error).toBe("bundle_not_ready");
+    await app.close();
+  });
+
+  it("returns 403 when token cannot access the bundle scope", async () => {
+    const bundleManager = createMockBundleManager();
+    const job: BundleJob<NormalizedBundleRequest> = {
+      bundleId: "bnd_prod",
+      status: "done",
+      createdAt: "2025-01-01T00:00:00Z",
+      updatedAt: "2025-01-01T00:00:05Z",
+      expiresAt: "2025-01-01T01:00:00Z",
+      params: {
+        timeWindow: { kind: "relative", sinceSeconds: 300 },
+        target: { kind: "selector", namespace: "prod", selector: "app=web" },
+        include: {
+          logs: { enabled: true, tailLines: 100, previous: false, timestamps: true, excludePatterns: [] },
+          events: { enabled: false },
+          metrics: { enabled: false },
+        },
+        limits: {
+          maxPods: 20,
+          maxTotalLogLines: 50_000,
+          sinceSecondsMax: 3600,
+          maxMetricsPods: 20,
+          metricsTimeoutMs: 2000,
+          metricsConcurrency: 10,
+        },
+      },
+      artifactPath: tmpFile,
+    };
+    bundleManager.jobs.set("bnd_prod", job);
+
+    const { app } = buildApp({ bundleManagerOverride: bundleManager });
+    const res = await app.inject({
+      method: "GET",
+      url: "/v1/bundles/bnd_prod/download",
+      headers: authHeader({ allowedNamespaces: ["dev"], capabilities: ["logs"] }),
+    });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error).toBe("forbidden");
     await app.close();
   });
 

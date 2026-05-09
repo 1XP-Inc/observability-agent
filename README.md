@@ -21,17 +21,19 @@ flowchart LR
 - **Logs** — K8s container logs, local file tail, or journalctl (systemd), with timestamp parsing, time-window filtering, and exclude patterns
 - **Events** — K8s events scoped to target pods (K8s mode only)
 - **Metrics** — Prometheus scraping from pod annotations (K8s) or configured URLs (standalone)
-- **JWT auth** — HS256 shared-secret authentication with mandatory `exp` claim
+- **JWT authz** — HS256 shared-secret authentication with mandatory `exp` claim and JWT scope claims
 - **Hard limits** — configurable caps on pods, log lines, and inflight bundles
-- **Zero write** — purely read-only; never modifies cluster or server state
+- **Target read-only** — never modifies cluster or server state; writes only local bundle artifacts under `OA_BUNDLE_DIR`
 
 ## Quick Start
 
 ### K8s Mode
 
+K8s mode is selected when `KUBERNETES_SERVICE_HOST` is present, which is normally true for in-cluster deployments.
+
 ```bash
 npm install && npm run build
-export OA_JWT_SECRET="your-secret-here"
+export OA_JWT_SECRET="replace-with-at-least-32-random-chars"
 npm start
 # → K8s mode detected, listening on http://0.0.0.0:8080
 ```
@@ -40,7 +42,7 @@ npm start
 
 ```bash
 npm install && npm run build
-export OA_JWT_SECRET="your-secret-here"
+export OA_JWT_SECRET="replace-with-at-least-32-random-chars"
 export OA_SERVICES='[
   {"name":"solana-validator","logs":["/var/log/solana/validator.log"],"metrics":"http://localhost:9090/metrics"},
   {"name":"rpc-node","logs":["/var/log/solana/rpc.log"]}
@@ -56,10 +58,36 @@ npm start
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `GET` | `/healthz` | Health check (no auth) |
+| `GET` | `/livez` | Liveness check (no auth) |
+| `GET` | `/readyz` | Readiness check (no auth) |
 | `GET` | `/skill.md` | Skill manifest for AI agents (no auth) |
+| `GET` | `/.well-known/skill.md` | Skill manifest alias (no auth) |
 | `POST` | `/v1/bundles` | Create a new observability bundle |
 | `GET` | `/v1/bundles/:id` | Check bundle status |
 | `GET` | `/v1/bundles/:id/download` | Download completed bundle (`.ndjson.gz`) |
+
+All non-health, non-skill endpoints require JWT auth. `OA_ALLOWED_IPS` uses the same exception list, so health and skill endpoints remain unauthenticated and outside the IP allowlist filter by design.
+
+Protected endpoints also enforce JWT authorization claims:
+
+```json
+{
+  "sub": "agent-01",
+  "allowedNamespaces": ["prod", "monitoring"],
+  "allowedServices": ["validator-*"],
+  "capabilities": ["pods", "logs", "events", "metrics"],
+  "admin": false
+}
+```
+
+- K8s pod discovery requires `capabilities: ["pods"]` and an allowed namespace.
+- K8s namespace scopes support exact names and `*` wildcards; `allowedNamespaces: ["*"]` permits all namespaces and `ns=*`.
+- K8s selector bundles also require `pods` because selector targeting performs pod discovery internally.
+- Bundle create/status/download checks the same namespace or service scope as the bundle target.
+- Bundle data sources require matching capabilities: `logs`, `events`, and/or `metrics`.
+- Standalone service scopes support `*` wildcards in `allowedServices`; `allowedServices: ["*"]` permits all configured services.
+- Non-admin pod/service discovery responses omit sensitive fields such as pod IPs, annotations, node names, log paths, journal units, and metrics URLs.
+- Legacy JWTs with no authorization scope claims keep full access for compatibility. Add `admin: false` with explicit scopes to opt into least-privilege authorization.
 
 ### K8s Mode
 
@@ -137,12 +165,23 @@ All configuration is via environment variables with sensible defaults:
 | `OA_PORT` | `8080` | HTTP listen port |
 | `OA_BUNDLE_DIR` | `/tmp/oa-bundles` | Directory for bundle artifacts |
 | `OA_BUNDLE_TTL_MINUTES` | `60` | Bundle artifact TTL |
+| `OA_CLEANUP_INTERVAL_MS` | `120000` | Bundle cleanup loop interval |
 | `OA_MAX_INFLIGHT_BUNDLES` | `5` | Max concurrent bundle jobs |
 | `OA_MAX_TOTAL_LOG_LINES` | `50000` | Hard limit on total log lines |
 | `OA_SINCE_SECONDS_MAX` | `3600` | Max time window (1 hour) |
 | `OA_METRICS_TIMEOUT_MS` | `2000` | Per-target metrics scrape timeout |
+| `OA_METRICS_CONCURRENCY` | `10` | K8s metrics scrape concurrency |
 | `OA_ALLOWED_IPS` | *(none)* | Comma-separated IP/CIDR allowlist (e.g. `10.0.0.1,192.168.0.0/16`) |
-| `OA_TRUST_PROXY` | *(none)* | Fastify `trustProxy` — `"true"` to trust all proxies, or a specific address/CIDR |
+| `OA_TRUST_PROXY` | *(none)* | Fastify `trustProxy`; prefer a specific proxy address/CIDR. `"true"` trusts all proxy headers and is unsafe on directly exposed listeners |
+| `OA_JWT_ISS` | *(none)* | Optional expected JWT issuer |
+| `OA_JWT_AUD` | *(none)* | Optional expected JWT audience |
+| `OA_DEFAULT_SINCE_SECONDS` | `600` | Default bundle time window |
+| `OA_DEFAULT_TAIL_LINES` | `2000` | Default K8s log tail lines per container |
+| `OA_DEFAULT_LOG_PREVIOUS` | `true` | Default K8s previous container log collection |
+| `OA_DEFAULT_LOG_TIMESTAMPS` | `true` | Default K8s timestamp request flag |
+| `OA_DEFAULT_INCLUDE_LOGS` | `true` | Default log collection |
+| `OA_DEFAULT_INCLUDE_EVENTS` | `true` | Default K8s event collection |
+| `OA_DEFAULT_INCLUDE_METRICS` | `true` | Default metrics collection |
 
 ### K8s Only
 
@@ -169,16 +208,22 @@ All configuration is via environment variables with sensible defaults:
 - `journal` (optional): systemd unit name for journalctl log collection
 - `metrics` (optional): Prometheus metrics URL to scrape
 
+Standalone collection is allowlisted by `OA_SERVICES`: API clients choose registered service names, not arbitrary file paths, journal units, or metrics URLs. OA does not elevate privileges. File logs and journal logs are readable only when the OA process already has the required OS permissions. For systemd, `journalctl` can show all system logs only when the current process account already has journal access (for example, root or an account that your OS grants journal read access to). Without that access, OA returns a skipped `log` record with `reason: "journal_permission_denied"` when journalctl reports a permission problem.
+
+Relative standalone file log requests read the latest configured line budget with `tail`; `sinceSeconds` does not seek older file contents. Absolute standalone requests post-filter lines with parseable timestamps and keep lines without parseable timestamps.
+
+Metrics URLs are configured by the operator and are fetched as-is for compatibility. Treat them as trusted configuration: OA does not block localhost, private network, or metadata-address targets by default.
+
 ## Testing
 
 ```bash
 npm test                 # run all tests
 npm run test:watch       # watch mode
-npm run test:coverage    # coverage report (98%+ target)
+npm run test:coverage    # coverage report
 ```
 
 ```
-20 test files · 526 tests · 98%+ coverage
+549 tests across 20 files
 ```
 
 ## Architecture
@@ -213,7 +258,7 @@ src/
     ├── validate.ts          # Standalone request validation
     ├── routes.ts            # Standalone HTTP route handlers
     ├── bundle-runner.ts     # Standalone collection orchestrator
-    ├── file-tail.ts         # Ring buffer file tail
+    ├── file-tail.ts         # tail(1)-based file tail
     ├── journal-reader.ts    # journalctl (systemd) log reader
     ├── log-collector.ts     # File + journal log collection
     └── metrics-collector.ts # URL-based metrics scraping

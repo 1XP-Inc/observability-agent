@@ -16,6 +16,8 @@ async function main(): Promise<void> {
   });
 
   app.get("/healthz", async () => ({ ok: true }));
+  app.get("/livez", async () => ({ ok: true }));
+  app.get("/readyz", async () => ({ ok: true }));
 
   if (config.allowedIps) {
     const { parseAllowList, ipFilterHook } = await import("./ip-filter");

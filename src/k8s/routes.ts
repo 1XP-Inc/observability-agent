@@ -9,9 +9,43 @@ import { normalizeBundleRequest } from "./validate";
 import { HttpError } from "../http-error";
 import { loadSkillMarkdown } from "../skill";
 import { listPodsAllNamespaces, listPodsNamespaced } from "./compat";
+import {
+  assertCapabilities,
+  assertNamespaceAllowed,
+  assertNamespacesAllowed,
+  principalFromRequest,
+  type Capability,
+  type Principal,
+} from "../authorization";
 
 function hasString(v: unknown): v is string {
   return typeof v === "string" && v.length > 0;
+}
+
+function sendHttpError(reply: any, err: HttpError): void {
+  reply.code(err.statusCode).send({ error: err.message, details: err.details });
+}
+
+function bundleCapabilities(params: NormalizedBundleRequest): Capability[] {
+  const capabilities: Capability[] = [];
+  if (params.include.logs.enabled) capabilities.push("logs");
+  if (params.include.events.enabled) capabilities.push("events");
+  if (params.include.metrics.enabled) capabilities.push("metrics");
+  return capabilities;
+}
+
+function authorizeBundle(principal: Principal, params: NormalizedBundleRequest): void {
+  if (principal.admin) return;
+  const capabilities = bundleCapabilities(params);
+  if (params.target.kind === "selector") capabilities.push("pods");
+  assertCapabilities(principal, capabilities);
+
+  if (params.target.kind === "selector") {
+    assertNamespaceAllowed(principal, params.target.namespace);
+    return;
+  }
+
+  assertNamespacesAllowed(principal, params.target.pods.map((p) => p.namespace));
 }
 
 export function registerRoutes(
@@ -33,10 +67,23 @@ export function registerRoutes(
   });
 
   app.get("/v1/pods", async (req, reply) => {
+    const principal = principalFromRequest(req);
+
     const q = (req.query as any) ?? {};
     const ns = hasString(q.ns) ? q.ns.trim() : "*";
     const selector = hasString(q.selector) ? q.selector.trim() : undefined;
     const needle = hasString(q.q) ? q.q : undefined;
+
+    try {
+      assertCapabilities(principal, ["pods"]);
+      assertNamespaceAllowed(principal, ns);
+    } catch (err: any) {
+      if (err instanceof HttpError) {
+        sendHttpError(reply, err);
+        return;
+      }
+      throw err;
+    }
 
     const limit = 500;
     const body =
@@ -52,17 +99,20 @@ export function registerRoutes(
     const out = items.map((p: any) => {
       const cond = (p.status?.conditions ?? []) as any[];
       const ready = cond.some((c: any) => c.type === "Ready" && c.status === "True");
-      return {
+      const item: Record<string, unknown> = {
         namespace: p.metadata?.namespace,
         name: p.metadata?.name,
-        podIP: p.status?.podIP,
         labels: p.metadata?.labels ?? {},
-        annotations: p.metadata?.annotations ?? {},
         containers: (p.spec?.containers ?? []).map((c: any) => c.name),
         ready,
-        nodeName: p.spec?.nodeName,
         phase: p.status?.phase,
       };
+      if (principal.admin) {
+        item.podIP = p.status?.podIP;
+        item.annotations = p.metadata?.annotations ?? {};
+        item.nodeName = p.spec?.nodeName;
+      }
+      return item;
     });
 
     reply.send({ items: out });
@@ -71,11 +121,12 @@ export function registerRoutes(
   app.post("/v1/bundles", async (req, reply) => {
     try {
       const normalized = normalizeBundleRequest(req.body as BundleRequest, config);
+      authorizeBundle(principalFromRequest(req), normalized);
       const job = await bundles.create(normalized);
       reply.send({ bundleId: job.bundleId, status: job.status });
     } catch (err: any) {
       if (err instanceof HttpError) {
-        reply.code(err.statusCode).send({ error: err.message, details: err.details });
+        sendHttpError(reply, err);
         return;
       }
       reply.code(500).send({ error: "internal_error" });
@@ -94,6 +145,15 @@ export function registerRoutes(
     if (!job) {
       reply.code(404).send({ error: "bundle_not_found" });
       return;
+    }
+    try {
+      authorizeBundle(principalFromRequest(req), job.params);
+    } catch (err: any) {
+      if (err instanceof HttpError) {
+        sendHttpError(reply, err);
+        return;
+      }
+      throw err;
     }
     const artifact = bundles.getArtifact(bundleId);
     reply.send({
@@ -117,6 +177,15 @@ export function registerRoutes(
     if (!job) {
       reply.code(404).send({ error: "bundle_not_found" });
       return;
+    }
+    try {
+      authorizeBundle(principalFromRequest(req), job.params);
+    } catch (err: any) {
+      if (err instanceof HttpError) {
+        sendHttpError(reply, err);
+        return;
+      }
+      throw err;
     }
     if (job.status !== "done" || !job.artifactPath) {
       reply.code(409).send({ error: "bundle_not_ready" });
