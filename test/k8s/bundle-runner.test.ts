@@ -107,9 +107,14 @@ function streamResponse(chunks: Uint8Array[]) {
         controller.close();
       },
     }),
-    text: vi.fn(async () => {
-      throw new Error("text fallback should not be used");
-    }),
+  };
+}
+
+function textResponse(text: string, init: { ok?: boolean; status?: number } = {}) {
+  return {
+    ...streamResponse([new TextEncoder().encode(text)]),
+    ok: init.ok ?? true,
+    status: init.status ?? 200,
   };
 }
 
@@ -1397,7 +1402,7 @@ describe("runBundle", () => {
         podIP: "10.0.0.1",
       });
       setupPodList([pod]);
-      (fetch as any).mockResolvedValue({ ok: true, status: 200, text: async () => "metric_a 1\n" });
+      (fetch as any).mockResolvedValue(textResponse("metric_a 1\n"));
 
       const job = makeJob({ params: metricsParams() });
       await runBundle({ config, coreV1, job });
@@ -1454,7 +1459,7 @@ describe("runBundle", () => {
         annotations: { "prometheus.io/scrape": "true", "prometheus.io/port": "9090" },
       });
       setupPodList([pod]);
-      (fetch as any).mockResolvedValue({ ok: true, status: 200, text: async () => "counter 42\n" });
+      (fetch as any).mockResolvedValue(textResponse("counter 42\n"));
 
       const job = makeJob({ params: metricsParams() });
       await runBundle({ config, coreV1, job });
@@ -1471,7 +1476,7 @@ describe("runBundle", () => {
         annotations: { "prometheus.io/scrape": "true", "prometheus.io/port": "9090" },
       });
       setupPodList([pod]);
-      (fetch as any).mockResolvedValue({ ok: false, status: 503, text: async () => "service unavailable" });
+      (fetch as any).mockResolvedValue(textResponse("service unavailable", { ok: false, status: 503 }));
 
       const job = makeJob({ params: metricsParams() });
       await runBundle({ config, coreV1, job });
@@ -1536,7 +1541,6 @@ describe("runBundle", () => {
 
       const errRecords = records.filter((r) => r.type === "metrics_text" && r.ok === false);
       expect(errRecords.some((r) => r.error?.includes("response_too_large"))).toBe(true);
-      expect(resp.text).not.toHaveBeenCalled();
     });
 
     it("maxMetricsPods exceeded throws HttpError 400", async () => {
@@ -1673,7 +1677,7 @@ describe("runBundle", () => {
         },
       });
       setupPodList([pod]);
-      (fetch as any).mockResolvedValue({ ok: true, status: 200, text: async () => "data\n" });
+      (fetch as any).mockResolvedValue(textResponse("data\n"));
 
       const job = makeJob({ params: metricsParams() });
       await runBundle({ config, coreV1, job });
@@ -1695,7 +1699,7 @@ describe("runBundle", () => {
         },
       });
       setupPodList([pod]);
-      (fetch as any).mockResolvedValue({ ok: true, status: 200, text: async () => "data\n" });
+      (fetch as any).mockResolvedValue(textResponse("data\n"));
 
       const job = makeJob({ params: metricsParams() });
       await runBundle({ config, coreV1, job });
@@ -1716,7 +1720,7 @@ describe("runBundle", () => {
         },
       });
       setupPodList([pod]);
-      (fetch as any).mockResolvedValue({ ok: true, status: 200, text: async () => "data\n" });
+      (fetch as any).mockResolvedValue(textResponse("data\n"));
 
       const job = makeJob({ params: metricsParams() });
       await runBundle({ config, coreV1, job });
@@ -1744,7 +1748,7 @@ describe("runBundle", () => {
         maxConcurrent = Math.max(maxConcurrent, concurrent);
         await new Promise((r) => setTimeout(r, 10));
         concurrent--;
-        return { ok: true, status: 200, text: async () => "data" };
+        return textResponse("data");
       });
 
       const job = makeJob({
@@ -1766,7 +1770,7 @@ describe("runBundle", () => {
       });
       const plainPod = createMockPod({ namespace: "default", name: "plain" });
       setupPodList([annotatedPod, plainPod]);
-      (fetch as any).mockResolvedValue({ ok: true, status: 200, text: async () => "data\n" });
+      (fetch as any).mockResolvedValue(textResponse("data\n"));
 
       const job = makeJob({ params: metricsParams() });
       await runBundle({ config, coreV1, job });

@@ -58,6 +58,8 @@ npm start
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `GET` | `/healthz` | Health check (no auth) |
+| `GET` | `/livez` | Liveness check (no auth) |
+| `GET` | `/readyz` | Readiness check (no auth) |
 | `GET` | `/skill.md` | Skill manifest for AI agents (no auth) |
 | `GET` | `/.well-known/skill.md` | Skill manifest alias (no auth) |
 | `POST` | `/v1/bundles` | Create a new observability bundle |
@@ -79,11 +81,13 @@ Protected endpoints also enforce JWT authorization claims:
 ```
 
 - K8s pod discovery requires `capabilities: ["pods"]` and an allowed namespace.
-- K8s `ns=*` is allowed only with `admin: true`.
+- K8s namespace scopes support exact names and `*` wildcards; `allowedNamespaces: ["*"]` permits all namespaces and `ns=*`.
+- K8s selector bundles also require `pods` because selector targeting performs pod discovery internally.
 - Bundle create/status/download checks the same namespace or service scope as the bundle target.
 - Bundle data sources require matching capabilities: `logs`, `events`, and/or `metrics`.
-- Standalone service scopes support `*` wildcards in `allowedServices`.
+- Standalone service scopes support `*` wildcards in `allowedServices`; `allowedServices: ["*"]` permits all configured services.
 - Non-admin pod/service discovery responses omit sensitive fields such as pod IPs, annotations, node names, log paths, journal units, and metrics URLs.
+- Legacy JWTs with no authorization scope claims keep full access for compatibility. Add `admin: false` with explicit scopes to opt into least-privilege authorization.
 
 ### K8s Mode
 
@@ -219,7 +223,7 @@ npm run test:coverage    # coverage report
 ```
 
 ```
-20+ test files
+549 tests across 20 files
 ```
 
 ## Architecture

@@ -19,21 +19,41 @@ function stringArray(v: unknown): string[] {
   return v.filter((item): item is string => typeof item === "string").map((item) => item.trim()).filter(Boolean);
 }
 
-function escapeRegExp(s: string): string {
-  return s.replace(/[|\\{}()[\]^$+?.]/g, "\\$&");
+function hasAuthorizationClaims(user: Record<string, unknown>): boolean {
+  return (
+    user.admin != null ||
+    user.allowedNamespaces != null ||
+    user.allowedServices != null ||
+    user.capabilities != null
+  );
 }
 
 function matchesPattern(pattern: string, value: string): boolean {
   if (pattern === value) return true;
   if (!pattern.includes("*")) return false;
-  const source = `^${pattern.split("*").map(escapeRegExp).join(".*")}$`;
-  return new RegExp(source).test(value);
+
+  const parts = pattern.split("*");
+  let pos = 0;
+  for (const [i, part] of parts.entries()) {
+    if (!part) continue;
+    const idx = value.indexOf(part, pos);
+    if (idx === -1) return false;
+    if (i === 0 && idx !== 0) return false;
+    pos = idx + part.length;
+  }
+
+  const last = parts[parts.length - 1];
+  return last === "" || value.endsWith(last);
 }
 
 export function principalFromRequest(request: FastifyRequest): Principal {
   const user = (request as any).user;
   if (!isRecord(user)) {
     return { admin: false, allowedNamespaces: [], allowedServices: [], capabilities: [] };
+  }
+
+  if (!hasAuthorizationClaims(user)) {
+    return { admin: true, allowedNamespaces: [], allowedServices: [], capabilities: [] };
   }
 
   return {
@@ -59,8 +79,7 @@ export function assertCapabilities(principal: Principal, capabilities: Capabilit
 
 export function isNamespaceAllowed(principal: Principal, namespace: string): boolean {
   if (principal.admin) return true;
-  if (namespace === "*") return false;
-  return principal.allowedNamespaces.includes(namespace);
+  return principal.allowedNamespaces.some((pattern) => matchesPattern(pattern, namespace));
 }
 
 export function assertNamespaceAllowed(principal: Principal, namespace: string): void {

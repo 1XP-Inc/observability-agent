@@ -25,7 +25,7 @@ JWT rules:
 - Algorithm: **HS256**
 - `exp` claim **required** (recommended 5–15 min)
 - Missing or invalid JWT → **401**
-- Missing namespace/service/capability scope → **403**
+- Scoped JWT missing namespace/service/capability scope → **403**
 
 > **The client (AI Agent) signs an HS256 JWT using `OA_JWT_SECRET` (env) and sends it with each request.**
 > The secret is used only in runtime memory — never expose it in logs, files, or output.
@@ -42,10 +42,12 @@ Authorization claims:
 ```
 
 - K8s pod discovery requires `pods` capability and namespace scope.
-- `ns=*` requires `admin: true`.
+- K8s namespace scopes support exact names and `*` wildcards; `allowedNamespaces: ["*"]` permits all namespaces and `ns=*`.
+- K8s selector bundles require `pods` capability because selector targeting performs pod discovery internally.
 - Bundle create/status/download enforce the bundle target scope and requested capabilities.
-- Standalone `allowedServices` entries can use `*` wildcards.
+- Standalone `allowedServices` entries can use `*` wildcards; `allowedServices: ["*"]` permits all configured services.
 - Non-admin discovery responses are redacted.
+- Legacy JWTs with no authorization scope claims keep full access for compatibility.
 ---
 
 ## Primary Workflow (bundle-first)
@@ -178,6 +180,10 @@ Standalone rules:
 - Logs are collected via `tail` from file paths configured per service and `journalctl -u` for configured systemd units
 - Clients cannot request arbitrary file paths or journal units; only registered `OA_SERVICES` entries are available
 - OA uses the current process OS permissions and does not elevate privileges
+
+K8s selector bundle note:
+- Selector targets list matching pods internally before collecting logs/events/metrics.
+- Scoped tokens therefore need both `pods` capability and the requested data-source capabilities for selector bundles.
 
 ### Log Line Exclude Filter (excludePatterns)
 `include.logs.excludePatterns: string[]` removes lines by substring match (like `grep -v`).

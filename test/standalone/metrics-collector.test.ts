@@ -43,9 +43,14 @@ function streamResponse(chunks: Uint8Array[]) {
         controller.close();
       },
     }),
-    text: vi.fn(async () => {
-      throw new Error("text fallback should not be used");
-    }),
+  };
+}
+
+function textResponse(text: string, init: { ok?: boolean; status?: number } = {}) {
+  return {
+    ...streamResponse([new TextEncoder().encode(text)]),
+    ok: init.ok ?? true,
+    status: init.status ?? 200,
   };
 }
 
@@ -57,7 +62,7 @@ describe("collectStandaloneMetrics", () => {
   it("fetches metrics from service URL and writes ok record", async () => {
     const services: ServiceDef[] = [{ name: "svc1", metrics: "http://localhost:9090/metrics" }];
     const { writer, records } = makeWriter();
-    (fetch as any).mockResolvedValue({ ok: true, status: 200, text: async () => "counter 42\n" });
+    (fetch as any).mockResolvedValue(textResponse("counter 42\n"));
 
     await collectStandaloneMetrics({ writer, services, req: makeReq() });
 
@@ -74,7 +79,7 @@ describe("collectStandaloneMetrics", () => {
   it("continues to allow private/internal metrics URLs", async () => {
     const services: ServiceDef[] = [{ name: "svc1", metrics: "http://10.0.0.5:9090/metrics" }];
     const { writer, records } = makeWriter();
-    (fetch as any).mockResolvedValue({ ok: true, status: 200, text: async () => "counter 42\n" });
+    (fetch as any).mockResolvedValue(textResponse("counter 42\n"));
 
     await collectStandaloneMetrics({ writer, services, req: makeReq() });
 
@@ -105,7 +110,7 @@ describe("collectStandaloneMetrics", () => {
   it("writes error record for non-200 response", async () => {
     const services: ServiceDef[] = [{ name: "svc1", metrics: "http://localhost:9090/metrics" }];
     const { writer, records } = makeWriter();
-    (fetch as any).mockResolvedValue({ ok: false, status: 503, text: async () => "unavailable" });
+    (fetch as any).mockResolvedValue(textResponse("unavailable", { ok: false, status: 503 }));
 
     await collectStandaloneMetrics({ writer, services, req: makeReq() });
 
@@ -154,7 +159,6 @@ describe("collectStandaloneMetrics", () => {
     const err = records.filter((r: any) => r.type === "metrics_text" && r.ok === false);
     expect(err.length).toBe(1);
     expect(err[0].error).toContain("response_too_large");
-    expect(resp.text).not.toHaveBeenCalled();
   });
 
   it("handles multiple services", async () => {
@@ -164,7 +168,7 @@ describe("collectStandaloneMetrics", () => {
       { name: "svc3", metrics: "http://localhost:9091/metrics" },
     ];
     const { writer, records } = makeWriter();
-    (fetch as any).mockResolvedValue({ ok: true, status: 200, text: async () => "data\n" });
+    (fetch as any).mockResolvedValue(textResponse("data\n"));
 
     await collectStandaloneMetrics({ writer, services, req: makeReq() });
 

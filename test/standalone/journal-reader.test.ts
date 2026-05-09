@@ -29,6 +29,11 @@ function lastCallArgs(): string[] {
   return call[1] as string[];
 }
 
+function lastCallOptions(): Record<string, any> {
+  const call = mockExecFileAsync.mock.calls[mockExecFileAsync.mock.calls.length - 1];
+  return call[2] as Record<string, any>;
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
 });
@@ -177,5 +182,13 @@ describe("readJournalLines", () => {
     expect(args).toEqual(
       expect.arrayContaining(["-u", "test.service", "-n", "200", "--no-pager", "-o", "short-iso"]),
     );
+  });
+
+  it("forces C locale for stable journalctl permission messages", async () => {
+    setupSuccess("line\n");
+
+    await readJournalLines({ unit: "test.service", maxLines: 200 });
+
+    expect(lastCallOptions().env).toMatchObject({ LANG: "C", LC_ALL: "C" });
   });
 });

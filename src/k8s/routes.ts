@@ -13,8 +13,6 @@ import {
   assertCapabilities,
   assertNamespaceAllowed,
   assertNamespacesAllowed,
-  hasCapability,
-  isNamespaceAllowed,
   principalFromRequest,
   type Capability,
   type Principal,
@@ -38,7 +36,9 @@ function bundleCapabilities(params: NormalizedBundleRequest): Capability[] {
 
 function authorizeBundle(principal: Principal, params: NormalizedBundleRequest): void {
   if (principal.admin) return;
-  assertCapabilities(principal, bundleCapabilities(params));
+  const capabilities = bundleCapabilities(params);
+  if (params.target.kind === "selector") capabilities.push("pods");
+  assertCapabilities(principal, capabilities);
 
   if (params.target.kind === "selector") {
     assertNamespaceAllowed(principal, params.target.namespace);
@@ -68,19 +68,21 @@ export function registerRoutes(
 
   app.get("/v1/pods", async (req, reply) => {
     const principal = principalFromRequest(req);
-    if (!hasCapability(principal, "pods")) {
-      reply.code(403).send({ error: "forbidden" });
-      return;
-    }
 
     const q = (req.query as any) ?? {};
     const ns = hasString(q.ns) ? q.ns.trim() : "*";
     const selector = hasString(q.selector) ? q.selector.trim() : undefined;
     const needle = hasString(q.q) ? q.q : undefined;
 
-    if (!isNamespaceAllowed(principal, ns)) {
-      reply.code(403).send({ error: "forbidden" });
-      return;
+    try {
+      assertCapabilities(principal, ["pods"]);
+      assertNamespaceAllowed(principal, ns);
+    } catch (err: any) {
+      if (err instanceof HttpError) {
+        sendHttpError(reply, err);
+        return;
+      }
+      throw err;
     }
 
     const limit = 500;

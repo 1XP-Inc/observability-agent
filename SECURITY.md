@@ -30,6 +30,9 @@ commit, reproduction steps, impact, and any suggested mitigation.
 - JWT authorization claims limit namespace, service, and data-source access.
   Use `admin: true` only for trusted operators because it permits cluster-wide
   pod discovery and bypasses scope checks.
+- JWTs without authorization scope claims retain full access for compatibility
+  with existing deployments. Issue scoped tokens with `admin: false`,
+  `capabilities`, and namespace/service allowlists to opt into least privilege.
 - `OA_TRUST_PROXY=true` trusts all forwarded IP headers. Use a concrete trusted
   proxy address or CIDR when the listener is reachable by clients.
 - Standalone file, journal, and metrics sources are operator-configured through

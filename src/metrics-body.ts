@@ -16,7 +16,6 @@ export class ResponseTooLargeError extends Error {
 
 type TextResponse = {
   body: ReadableStream<Uint8Array> | null;
-  text: () => Promise<string>;
 };
 
 export async function readResponseTextWithLimit(
@@ -24,16 +23,13 @@ export async function readResponseTextWithLimit(
   maxBytes: number = MAX_METRICS_BODY_BYTES,
 ): Promise<string> {
   if (!response.body) {
-    const text = await response.text();
-    const bytes = Buffer.byteLength(text);
-    if (bytes > maxBytes) throw new ResponseTooLargeError(bytes, maxBytes);
-    return text;
+    return "";
   }
 
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let bytesRead = 0;
-  let text = "";
+  const chunks: string[] = [];
 
   try {
     while (true) {
@@ -44,12 +40,13 @@ export async function readResponseTextWithLimit(
         await reader.cancel().catch(() => {});
         throw new ResponseTooLargeError(bytesRead, maxBytes);
       }
-      text += decoder.decode(value, { stream: true });
+      chunks.push(decoder.decode(value, { stream: true }));
     }
   } finally {
     reader.releaseLock();
   }
 
-  text += decoder.decode();
-  return text;
+  const tail = decoder.decode();
+  if (tail) chunks.push(tail);
+  return chunks.join("");
 }

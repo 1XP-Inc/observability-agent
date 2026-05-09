@@ -109,6 +109,35 @@ describe("GET /v1/services", () => {
     expect(res.json().items).toEqual([{ name: "rpc-node" }]);
     await app.close();
   });
+
+  it("allows wildcard service scopes for non-admin tokens", async () => {
+    const { app } = buildApp();
+    const res = await app.inject({
+      method: "GET",
+      url: "/v1/services",
+      headers: authHeader({ allowedServices: ["*"], capabilities: ["logs"] }),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().items).toEqual([{ name: "solana-validator" }, { name: "rpc-node" }]);
+    await app.close();
+  });
+
+  it("preserves full service details for legacy tokens without authorization claims", async () => {
+    const { app } = buildApp();
+    const res = await app.inject({
+      method: "GET",
+      url: "/v1/services",
+      headers: { authorization: `Bearer ${validToken({})}` },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().items[0]).toEqual({
+      name: "solana-validator",
+      logs: ["/var/log/solana/validator.log"],
+      journal: "sol.service",
+      metrics: "http://localhost:9090/metrics",
+    });
+    await app.close();
+  });
 });
 
 describe("POST /v1/bundles (standalone)", () => {

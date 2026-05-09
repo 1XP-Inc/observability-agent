@@ -182,6 +182,38 @@ describe("GET /v1/pods", () => {
     await app.close();
   });
 
+  it("allows ns=* when scoped token explicitly allows all namespaces", async () => {
+    const coreV1 = createMockCoreV1Api();
+    const pod = createMockPod({ namespace: "prod", name: "pod-1" });
+    (coreV1 as any).listPodForAllNamespaces.mockResolvedValue({ body: { items: [pod] } });
+    const { app } = buildApp({ coreV1Override: coreV1 });
+    const res = await app.inject({
+      method: "GET",
+      url: "/v1/pods?ns=*",
+      headers: authHeader({ allowedNamespaces: ["*"], capabilities: ["pods"] }),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().items).toHaveLength(1);
+    expect((coreV1 as any).listPodForAllNamespaces).toHaveBeenCalled();
+    await app.close();
+  });
+
+  it("allows namespace wildcard patterns for scoped tokens", async () => {
+    const coreV1 = createMockCoreV1Api();
+    const pod = createMockPod({ namespace: "prod-a", name: "pod-1" });
+    (coreV1 as any).listNamespacedPod.mockResolvedValue({ body: { items: [pod] } });
+    const { app } = buildApp({ coreV1Override: coreV1 });
+    const res = await app.inject({
+      method: "GET",
+      url: "/v1/pods?ns=prod-a",
+      headers: authHeader({ allowedNamespaces: ["prod-*"], capabilities: ["pods"] }),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().items).toHaveLength(1);
+    expect((coreV1 as any).listNamespacedPod).toHaveBeenCalled();
+    await app.close();
+  });
+
   it("rejects pods listing without pods capability", async () => {
     const coreV1 = createMockCoreV1Api();
     const { app } = buildApp({ coreV1Override: coreV1 });
@@ -213,6 +245,28 @@ describe("GET /v1/pods", () => {
     expect(body.items[0].namespace).toBe("ns-a");
     expect(body.items[0].name).toBe("pod-1");
     expect((coreV1 as any).listPodForAllNamespaces).toHaveBeenCalled();
+    await app.close();
+  });
+
+  it("preserves full access for legacy tokens without authorization claims", async () => {
+    const coreV1 = createMockCoreV1Api();
+    const pod = createMockPod({ namespace: "ns-a", name: "pod-1" });
+    (coreV1 as any).listPodForAllNamespaces.mockResolvedValue({ body: { items: [pod] } });
+
+    const { app } = buildApp({ coreV1Override: coreV1 });
+    const res = await app.inject({
+      method: "GET",
+      url: "/v1/pods",
+      headers: { authorization: `Bearer ${validToken({})}` },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().items[0]).toMatchObject({
+      namespace: "ns-a",
+      name: "pod-1",
+      podIP: pod.status?.podIP,
+      annotations: pod.metadata?.annotations,
+      nodeName: pod.spec?.nodeName,
+    });
     await app.close();
   });
 
@@ -498,7 +552,22 @@ describe("POST /v1/bundles", () => {
     await app.close();
   });
 
-  it("creates a namespace-scoped bundle for a matching scoped token", async () => {
+  it("creates a selector bundle for a matching scoped token with pods capability", async () => {
+    const bundleManager = createMockBundleManager();
+    const { app } = buildApp({ bundleManagerOverride: bundleManager });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/bundles",
+      headers: authHeader({ allowedNamespaces: ["default"], capabilities: ["pods", "logs", "events", "metrics"] }),
+      payload: validBundleBody,
+    });
+    expect(res.statusCode).toBe(200);
+    expect(bundleManager.create).toHaveBeenCalledOnce();
+    await app.close();
+  });
+
+  it("rejects selector bundles when pods capability is missing", async () => {
     const bundleManager = createMockBundleManager();
     const { app } = buildApp({ bundleManagerOverride: bundleManager });
 
@@ -508,8 +577,9 @@ describe("POST /v1/bundles", () => {
       headers: authHeader({ allowedNamespaces: ["default"], capabilities: ["logs", "events", "metrics"] }),
       payload: validBundleBody,
     });
-    expect(res.statusCode).toBe(200);
-    expect(bundleManager.create).toHaveBeenCalledOnce();
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error).toBe("forbidden");
+    expect(bundleManager.create).not.toHaveBeenCalled();
     await app.close();
   });
 
@@ -520,7 +590,7 @@ describe("POST /v1/bundles", () => {
     const res = await app.inject({
       method: "POST",
       url: "/v1/bundles",
-      headers: authHeader({ allowedNamespaces: ["prod"], capabilities: ["logs", "events", "metrics"] }),
+      headers: authHeader({ allowedNamespaces: ["prod"], capabilities: ["pods", "logs", "events", "metrics"] }),
       payload: { target: { namespace: "*", selector: "app=web" } },
     });
     expect(res.statusCode).toBe(403);
@@ -536,7 +606,7 @@ describe("POST /v1/bundles", () => {
     const res = await app.inject({
       method: "POST",
       url: "/v1/bundles",
-      headers: authHeader({ allowedNamespaces: ["default"], capabilities: ["logs"] }),
+      headers: authHeader({ allowedNamespaces: ["default"], capabilities: ["pods", "logs"] }),
       payload: {
         ...validBundleBody,
         include: { logs: { enabled: true }, events: { enabled: false }, metrics: { enabled: true } },

@@ -42,6 +42,7 @@ export async function readJournalLines(params: {
     const result = await execFileAsync("journalctl", args, {
       timeout: TIMEOUT_MS,
       maxBuffer: Math.max(MIN_BUFFER, maxLines * BYTES_PER_LINE),
+      env: { ...process.env, LANG: "C", LC_ALL: "C" },
     });
     stdout = result.stdout;
     stderr = result.stderr;
