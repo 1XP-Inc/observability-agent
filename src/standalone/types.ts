@@ -1,7 +1,11 @@
+export type JournalScope = "system" | "user";
+
 export type ServiceDef = {
   name: string;
   logs?: string[];
   journal?: string;
+  journalScope?: JournalScope;
+  journalUser?: string;
   metrics?: string;
 };
 

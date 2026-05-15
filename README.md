@@ -147,7 +147,8 @@ curl -X POST https://oa.example.com/v1/bundles \
 | `meta` | Both | Bundle metadata (bundleId, params, timestamps) |
 | `log` | K8s | Container log line (namespace, pod, container, ts, line) |
 | `log` | Standalone | File log line (service, file, ts, line) |
-| `log` | Standalone | Journal log line (service, journal, ts, line) |
+| `log` | Standalone | Journal log line (service, journal, ts, line, journalScope?, journalUser?) |
+| `log_error` | Standalone | User journal configuration or permission error (service, journal, journalScope, journalUser, ts, reason, error) |
 | `event` | K8s only | K8s event (reason, message, involvedObject) |
 | `metrics_text` | K8s | Pod metrics scrape (namespace, pod, port, path) |
 | `metrics_text` | Standalone | Service metrics scrape (service, url) |
@@ -199,16 +200,19 @@ All configuration is via environment variables with sensible defaults:
 `OA_SERVICES` format:
 ```json
 [
-  { "name": "svc-name", "logs": ["/path/to/log"], "journal": "unit.service", "metrics": "http://host:port/metrics" }
+  { "name": "svc-name", "logs": ["/path/to/log"], "journal": "unit.service", "metrics": "http://host:port/metrics" },
+  { "name": "user-svc", "journal": "user-unit.service", "journalScope": "user", "journalUser": "ubuntu" }
 ]
 ```
 
 - `name` (required): unique service identifier
 - `logs` (optional): array of log file paths to tail
 - `journal` (optional): systemd unit name for journalctl log collection
+- `journalScope` (optional): `"system"` (default) or `"user"`
+- `journalUser` (optional): username or UID required when `journalScope` is `"user"`
 - `metrics` (optional): Prometheus metrics URL to scrape
 
-Standalone collection is allowlisted by `OA_SERVICES`: API clients choose registered service names, not arbitrary file paths, journal units, or metrics URLs. OA does not elevate privileges. File logs and journal logs are readable only when the OA process already has the required OS permissions. For systemd, `journalctl` can show all system logs only when the current process account already has journal access (for example, root or an account that your OS grants journal read access to). Without that access, OA returns a skipped `log` record with `reason: "journal_permission_denied"` when journalctl reports a permission problem.
+Standalone collection is allowlisted by `OA_SERVICES`: API clients choose registered service names, not arbitrary file paths, journal units, or metrics URLs. OA does not elevate privileges. File logs and journal logs are readable only when the OA process already has the required OS permissions. For systemd, `journalctl` can show all system and user journals only when the current process account already has journal access (for example, root or an account in `systemd-journal`). Without system journal access, OA returns a skipped `log` record with `reason: "journal_permission_denied"` when journalctl reports a permission problem. Without user journal access, or when `journalUser` cannot be resolved, OA returns a `log_error` record with `journalScope` and `journalUser`.
 
 Relative standalone file log requests read the latest configured line budget with `tail`; `sinceSeconds` does not seek older file contents. Absolute standalone requests post-filter lines with parseable timestamps and keep lines without parseable timestamps.
 

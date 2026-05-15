@@ -108,6 +108,37 @@ function parseServices(): ServiceDef[] | undefined {
       }
       svc.journal = item.journal.trim();
     }
+    if (item.journalScope != null) {
+      if (typeof item.journalScope !== "string") {
+        throw new Error(`OA_SERVICES[${i}].journalScope must be "system" or "user"`);
+      }
+      const journalScope = item.journalScope.trim();
+      if (journalScope !== "system" && journalScope !== "user") {
+        throw new Error(`OA_SERVICES[${i}].journalScope must be "system" or "user"`);
+      }
+      svc.journalScope = journalScope;
+    }
+    if (item.journalUser != null) {
+      if (typeof item.journalUser === "number") {
+        if (!Number.isFinite(item.journalUser) || !Number.isInteger(item.journalUser)) {
+          throw new Error(`OA_SERVICES[${i}].journalUser must be a non-empty string or integer UID`);
+        }
+        svc.journalUser = String(item.journalUser);
+      } else if (typeof item.journalUser === "string" && item.journalUser.trim()) {
+        svc.journalUser = item.journalUser.trim();
+      } else {
+        throw new Error(`OA_SERVICES[${i}].journalUser must be a non-empty string or integer UID`);
+      }
+    }
+    if (svc.journalScope != null && !svc.journal) {
+      throw new Error(`OA_SERVICES[${i}].journal is required when journalScope is set`);
+    }
+    if (svc.journalScope === "user" && !svc.journalUser) {
+      throw new Error(`OA_SERVICES[${i}].journalUser is required when journalScope is user`);
+    }
+    if (svc.journalScope !== "user" && svc.journalUser) {
+      throw new Error(`OA_SERVICES[${i}].journalUser requires journalScope to be user`);
+    }
     if (item.metrics != null) {
       if (typeof item.metrics !== "string" || !item.metrics.trim()) {
         throw new Error(`OA_SERVICES[${i}].metrics must be a non-empty string`);

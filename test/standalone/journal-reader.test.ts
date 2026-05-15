@@ -34,6 +34,11 @@ function lastCallOptions(): Record<string, any> {
   return call[2] as Record<string, any>;
 }
 
+function callArgs(index: number): string[] {
+  const call = mockExecFileAsync.mock.calls[index];
+  return call[1] as string[];
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
 });
@@ -69,6 +74,14 @@ describe("readJournalLines", () => {
     const lines = await readJournalLines({ unit: "nginx.service", maxLines: 100 });
 
     expect(lines).toEqual([]);
+  });
+
+  it("preserves system journal No entries output for compatibility", async () => {
+    setupSuccess("-- No entries --\n");
+
+    const lines = await readJournalLines({ unit: "nginx.service", maxLines: 100 });
+
+    expect(lines).toEqual(["-- No entries --"]);
   });
 
   it("returns empty array when maxLines is 0", async () => {
@@ -190,5 +203,197 @@ describe("readJournalLines", () => {
     await readJournalLines({ unit: "test.service", maxLines: 200 });
 
     expect(lastCallOptions().env).toMatchObject({ LANG: "C", LC_ALL: "C" });
+  });
+
+  it("reads user journal with resolved username UID", async () => {
+    mockExecFileAsync
+      .mockResolvedValueOnce({ stdout: "1000\n", stderr: "" })
+      .mockResolvedValueOnce({
+        stdout: "2026-05-15T03:45:01+0000 bera-beacond[123]: started\n",
+        stderr: "",
+      });
+
+    const lines = await readJournalLines({
+      unit: "bera-beacond.service",
+      journalScope: "user",
+      journalUser: "ubuntu",
+      maxLines: 100,
+      sinceSeconds: 900,
+    });
+
+    expect(lines).toEqual(["2026-05-15T03:45:01+0000 bera-beacond[123]: started"]);
+    expect(callArgs(0)).toEqual(["-u", "ubuntu"]);
+    expect(callArgs(1)).toEqual(
+      expect.arrayContaining([
+        "--user-unit",
+        "bera-beacond.service",
+        "_UID=1000",
+        "--no-hostname",
+        "--no-pager",
+        "-o",
+        "short-iso",
+        "--since",
+        "900 seconds ago",
+      ]),
+    );
+  });
+
+  it("reads user journal with numeric UID", async () => {
+    mockExecFileAsync
+      .mockResolvedValueOnce({ stdout: "line\n", stderr: "" });
+
+    await readJournalLines({
+      unit: "bera-reth.service",
+      journalScope: "user",
+      journalUser: "1000",
+      maxLines: 50,
+    });
+
+    expect(mockExecFileAsync).toHaveBeenCalledTimes(1);
+    expect(callArgs(0)).toEqual(
+      expect.arrayContaining(["--user-unit", "bera-reth.service", "_UID=1000"]),
+    );
+  });
+
+  it("falls back to _SYSTEMD_USER_UNIT when --user-unit is unsupported", async () => {
+    const unsupported = new Error("Command failed: journalctl") as NodeJS.ErrnoException & { stderr?: string };
+    unsupported.code = "1";
+    unsupported.stderr = "journalctl: unrecognized option '--user-unit'";
+    mockExecFileAsync
+      .mockResolvedValueOnce({ stdout: "1000\n", stderr: "" })
+      .mockRejectedValueOnce(unsupported)
+      .mockResolvedValueOnce({ stdout: "fallback-line\n", stderr: "" });
+
+    const lines = await readJournalLines({
+      unit: "bera-beacond.service",
+      journalScope: "user",
+      journalUser: "ubuntu",
+      maxLines: 25,
+    });
+
+    expect(lines).toEqual(["fallback-line"]);
+    expect(callArgs(2)).toEqual(
+      expect.arrayContaining(["_UID=1000", "_SYSTEMD_USER_UNIT=bera-beacond.service"]),
+    );
+    expect(callArgs(2)).not.toContain("--user-unit");
+  });
+
+  it("falls back to _SYSTEMD_USER_UNIT when --user-unit returns no output", async () => {
+    mockExecFileAsync
+      .mockResolvedValueOnce({ stdout: "1000\n", stderr: "" })
+      .mockResolvedValueOnce({ stdout: "", stderr: "" })
+      .mockResolvedValueOnce({
+        stdout: "2026-05-15T03:45:01+0000 bera-beacond[123]: started\n",
+        stderr: "",
+      });
+
+    const lines = await readJournalLines({
+      unit: "bera-beacond.service",
+      journalScope: "user",
+      journalUser: "ubuntu",
+      maxLines: 25,
+    });
+
+    expect(lines).toEqual(["2026-05-15T03:45:01+0000 bera-beacond[123]: started"]);
+    expect(callArgs(1)).toEqual(
+      expect.arrayContaining(["--user-unit", "bera-beacond.service", "_UID=1000"]),
+    );
+    expect(callArgs(2)).toEqual(
+      expect.arrayContaining(["_UID=1000", "_SYSTEMD_USER_UNIT=bera-beacond.service"]),
+    );
+  });
+
+  it("falls back to _SYSTEMD_USER_UNIT when --user-unit returns No entries", async () => {
+    mockExecFileAsync
+      .mockResolvedValueOnce({ stdout: "1000\n", stderr: "" })
+      .mockResolvedValueOnce({ stdout: "-- No entries --\n", stderr: "" })
+      .mockResolvedValueOnce({ stdout: "fallback-line\n", stderr: "" });
+
+    const lines = await readJournalLines({
+      unit: "bera-beacond.service",
+      journalScope: "user",
+      journalUser: "ubuntu",
+      maxLines: 25,
+    });
+
+    expect(lines).toEqual(["fallback-line"]);
+    expect(callArgs(2)).toEqual(
+      expect.arrayContaining(["_UID=1000", "_SYSTEMD_USER_UNIT=bera-beacond.service"]),
+    );
+  });
+
+  it("returns empty array when user journal primary and fallback have no entries", async () => {
+    mockExecFileAsync
+      .mockResolvedValueOnce({ stdout: "1000\n", stderr: "" })
+      .mockResolvedValueOnce({ stdout: "", stderr: "" })
+      .mockResolvedValueOnce({ stdout: "-- No entries --\n", stderr: "" });
+
+    const lines = await readJournalLines({
+      unit: "bera-beacond.service",
+      journalScope: "user",
+      journalUser: "ubuntu",
+      maxLines: 25,
+    });
+
+    expect(lines).toEqual([]);
+    expect(mockExecFileAsync).toHaveBeenCalledTimes(3);
+  });
+
+  it("throws ENOUSER when journalUser cannot be resolved", async () => {
+    const err = new Error("Command failed: id") as NodeJS.ErrnoException & { stderr?: string };
+    err.code = "1";
+    err.stderr = "id: 'missing': no such user";
+    mockExecFileAsync.mockRejectedValue(err);
+
+    await expect(
+      readJournalLines({
+        unit: "app.service",
+        journalScope: "user",
+        journalUser: "missing",
+        maxLines: 100,
+      }),
+    ).rejects.toMatchObject({ code: "ENOUSER" });
+  });
+
+  it("throws EINVAL for malformed numeric journalUser", async () => {
+    await expect(
+      readJournalLines({
+        unit: "app.service",
+        journalScope: "user",
+        journalUser: "-1",
+        maxLines: 100,
+      }),
+    ).rejects.toMatchObject({ code: "EINVAL" });
+    expect(mockExecFileAsync).not.toHaveBeenCalled();
+  });
+
+  it("throws EINVAL for out-of-range numeric journalUser", async () => {
+    await expect(
+      readJournalLines({
+        unit: "app.service",
+        journalScope: "user",
+        journalUser: "4294967296",
+        maxLines: 100,
+      }),
+    ).rejects.toMatchObject({ code: "EINVAL" });
+    expect(mockExecFileAsync).not.toHaveBeenCalled();
+  });
+
+  it("throws EACCES when user journal stderr contains permission hint", async () => {
+    mockExecFileAsync
+      .mockResolvedValueOnce({ stdout: "1000\n", stderr: "" })
+      .mockResolvedValueOnce({
+        stdout: "",
+        stderr: "Failed to open journal: Permission denied",
+      });
+
+    await expect(
+      readJournalLines({
+        unit: "app.service",
+        journalScope: "user",
+        journalUser: "ubuntu",
+        maxLines: 100,
+      }),
+    ).rejects.toMatchObject({ code: "EACCES" });
   });
 });

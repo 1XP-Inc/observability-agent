@@ -14,6 +14,7 @@ const SECRET = "test-secret-key-for-testing-hs256";
 const services: ServiceDef[] = [
   { name: "solana-validator", logs: ["/var/log/solana/validator.log"], journal: "sol.service", metrics: "http://localhost:9090/metrics" },
   { name: "rpc-node", logs: ["/var/log/solana/rpc.log"] },
+  { name: "beacond", journal: "bera-beacond.service", journalScope: "user", journalUser: "ubuntu" },
 ];
 
 function validToken(payload?: Record<string, any>) {
@@ -75,7 +76,7 @@ describe("GET /v1/services", () => {
     });
     expect(res.statusCode).toBe(200);
     const body = res.json();
-    expect(body.items).toHaveLength(2);
+    expect(body.items).toHaveLength(3);
     expect(body.items[0]).toEqual({
       name: "solana-validator",
       logs: ["/var/log/solana/validator.log"],
@@ -86,6 +87,14 @@ describe("GET /v1/services", () => {
       name: "rpc-node",
       logs: ["/var/log/solana/rpc.log"],
       journal: null,
+      metrics: null,
+    });
+    expect(body.items[2]).toEqual({
+      name: "beacond",
+      logs: [],
+      journal: "bera-beacond.service",
+      journalScope: "user",
+      journalUser: "ubuntu",
       metrics: null,
     });
     await app.close();
@@ -118,7 +127,7 @@ describe("GET /v1/services", () => {
       headers: authHeader({ allowedServices: ["*"], capabilities: ["logs"] }),
     });
     expect(res.statusCode).toBe(200);
-    expect(res.json().items).toEqual([{ name: "solana-validator" }, { name: "rpc-node" }]);
+    expect(res.json().items).toEqual([{ name: "solana-validator" }, { name: "rpc-node" }, { name: "beacond" }]);
     await app.close();
   });
 
