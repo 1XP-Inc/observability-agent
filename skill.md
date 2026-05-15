@@ -224,7 +224,8 @@ Example:
 | type | Description | Key Fields |
 |------|-------------|------------|
 | `log` | File log | service, file, ts, line, skipped?, reason? |
-| `log` | Journal log | service, journal, ts, line, skipped?, reason? |
+| `log` | Journal log | service, journal, journalScope?, journalUser?, ts, line, skipped?, reason? |
+| `log_error` | User journal error | service, journal, journalScope, journalUser, ts, reason, error |
 | `metrics_text` | Service metrics | service, url, ts, ok/skipped/error, content |
 
 Standalone log skip reasons:
@@ -344,12 +345,15 @@ Service definition fields:
 | `name` | Yes | Unique service identifier |
 | `logs` | No | Array of log file paths to collect |
 | `journal` | No | systemd unit name (journalctl log collection) |
+| `journalScope` | No | `system` (default) or `user` |
+| `journalUser` | No | Username or UID required when `journalScope` is `user` |
 | `metrics` | No | Prometheus metrics URL |
 
 Standalone permission model:
 - File and journal readability depends on the OS permissions of the OA process.
 - OA does not create users, join system groups, run sudo, or bypass systemd journal permissions.
-- Full system journal visibility is possible only when the existing process account can already read those journals.
+- Full system and user journal visibility is possible only when the existing process account can already read those journals.
+- User journal permission and `journalUser` resolution failures are emitted as `log_error` records instead of empty log output.
 - Metrics URLs are operator-provided trusted configuration and may point at localhost or private networks for compatibility.
 
 Standalone time windows:

@@ -71,6 +71,8 @@ export function registerStandaloneRoutes(
       if (principal.admin) {
         item.logs = s.logs ?? [];
         item.journal = s.journal ?? null;
+        if (s.journalScope) item.journalScope = s.journalScope;
+        if (s.journalUser) item.journalUser = s.journalUser;
         item.metrics = s.metrics ?? null;
       }
       return item;

@@ -247,6 +247,70 @@ describe("collectStandaloneLogs", () => {
     });
   });
 
+  it("collects user journal logs with scope metadata", async () => {
+    mockReadJournalLines.mockResolvedValue([
+      "2026-05-15T03:45:01+0000 bera-beacond[123]: started",
+    ]);
+    const services: ServiceDef[] = [{
+      name: "beacond",
+      journal: "bera-beacond.service",
+      journalScope: "user",
+      journalUser: "ubuntu",
+    }];
+    const { writer, records } = makeWriter();
+
+    await collectStandaloneLogs({ writer, services, req: makeReq() });
+
+    expect(mockReadJournalLines).toHaveBeenCalledWith(expect.objectContaining({
+      unit: "bera-beacond.service",
+      journalScope: "user",
+      journalUser: "ubuntu",
+    }));
+    expect(records[0]).toMatchObject({
+      type: "log",
+      service: "beacond",
+      journal: "bera-beacond.service",
+      journalScope: "user",
+      journalUser: "ubuntu",
+      ts: "2026-05-15T03:45:01+0000",
+      line: "bera-beacond[123]: started",
+    });
+  });
+
+  it("writes No entries only for successful empty user journal reads", async () => {
+    mockReadJournalLines.mockResolvedValue([]);
+    const services: ServiceDef[] = [{
+      name: "beacond",
+      journal: "bera-beacond.service",
+      journalScope: "user",
+      journalUser: "ubuntu",
+    }];
+    const { writer, records } = makeWriter();
+
+    await collectStandaloneLogs({ writer, services, req: makeReq() });
+
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({
+      type: "log",
+      service: "beacond",
+      journal: "bera-beacond.service",
+      journalScope: "user",
+      journalUser: "ubuntu",
+      ts: "--",
+      line: "No entries --",
+    });
+  });
+
+  it("keeps empty system journal reads silent for compatibility", async () => {
+    mockReadJournalLines.mockResolvedValue([]);
+    const services: ServiceDef[] = [{ name: "svc1", journal: "nginx.service" }];
+    const { writer, records } = makeWriter();
+
+    await collectStandaloneLogs({ writer, services, req: makeReq() });
+
+    expect(records).toEqual([]);
+  });
+
   it("collects file and journal logs simultaneously", async () => {
     const logFile = tmpLog("2024-01-01T00:00:00Z file-line\n");
     mockReadJournalLines.mockResolvedValue([
@@ -342,6 +406,106 @@ describe("collectStandaloneLogs", () => {
       journal: "nginx.service",
       skipped: true,
       reason: "journal_permission_denied",
+    });
+  });
+
+  it("writes log_error for user journal permission errors", async () => {
+    const err = new Error("not seeing messages from other users") as NodeJS.ErrnoException;
+    err.code = "EACCES";
+    mockReadJournalLines.mockRejectedValue(err);
+    const services: ServiceDef[] = [{
+      name: "beacond",
+      journal: "bera-beacond.service",
+      journalScope: "user",
+      journalUser: "ubuntu",
+    }];
+    const { writer, records } = makeWriter();
+
+    await collectStandaloneLogs({ writer, services, req: makeReq() });
+
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({
+      type: "log_error",
+      service: "beacond",
+      journal: "bera-beacond.service",
+      journalScope: "user",
+      journalUser: "ubuntu",
+      reason: "journal_permission_denied",
+      error: "permission denied reading user journal; add the OA process user to systemd-journal and restart OA",
+    });
+  });
+
+  it("does not write No entries when user journal lines are filtered out", async () => {
+    mockReadJournalLines.mockResolvedValue([
+      "2026-05-15T03:45:01+0000 bera-beacond[123]: filtered",
+    ]);
+    const services: ServiceDef[] = [{
+      name: "beacond",
+      journal: "bera-beacond.service",
+      journalScope: "user",
+      journalUser: "ubuntu",
+    }];
+    const { writer, records } = makeWriter();
+
+    await collectStandaloneLogs({
+      writer,
+      services,
+      req: makeReq({
+        include: {
+          logs: { enabled: true, excludePatterns: ["filtered"] },
+          metrics: { enabled: false },
+        },
+      }),
+    });
+
+    expect(records).toEqual([]);
+  });
+
+  it("writes string error for non-Error user journal failures", async () => {
+    mockReadJournalLines.mockRejectedValue("journal failed");
+    const services: ServiceDef[] = [{
+      name: "beacond",
+      journal: "bera-beacond.service",
+      journalScope: "user",
+      journalUser: "ubuntu",
+    }];
+    const { writer, records } = makeWriter();
+
+    await collectStandaloneLogs({ writer, services, req: makeReq() });
+
+    expect(records[0]).toMatchObject({
+      type: "log_error",
+      service: "beacond",
+      journal: "bera-beacond.service",
+      journalScope: "user",
+      journalUser: "ubuntu",
+      reason: "journal_read_error",
+      error: "journal failed",
+    });
+  });
+
+  it("writes log_error for unresolved user journal users", async () => {
+    const err = new Error('journalUser "missing" was not found or is not a valid UID') as NodeJS.ErrnoException;
+    err.code = "ENOUSER";
+    mockReadJournalLines.mockRejectedValue(err);
+    const services: ServiceDef[] = [{
+      name: "beacond",
+      journal: "bera-beacond.service",
+      journalScope: "user",
+      journalUser: "missing",
+    }];
+    const { writer, records } = makeWriter();
+
+    await collectStandaloneLogs({ writer, services, req: makeReq() });
+
+    expect(records[0]).toMatchObject({
+      type: "log_error",
+      service: "beacond",
+      journal: "bera-beacond.service",
+      journalScope: "user",
+      journalUser: "missing",
+      reason: "journal_user_not_found",
+      error: 'journalUser "missing" was not found or is not a valid UID',
     });
   });
 
