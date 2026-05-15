@@ -31,17 +31,37 @@ function journalErrorReason(err: any): string {
   return "journal_read_error";
 }
 
-function userJournalErrorMessage(reason: string, err: any): string | undefined {
+function fallbackErrorMessage(err: any): string {
+  if (typeof err?.stderr === "string" && err.stderr.trim()) return err.stderr.trim();
+  if (typeof err?.message === "string" && err.message.trim()) return err.message;
+  if (err == null) return "unknown error";
+  if (typeof err === "string" && err.trim()) return err;
+  try {
+    const json = JSON.stringify(err);
+    if (json && json !== "{}") return json;
+  } catch {
+    // Fall through to String() conversion.
+  }
+  try {
+    const text = String(err);
+    if (text && text !== "[object Object]") return text;
+  } catch {
+    // Fall through to the fixed fallback.
+  }
+  return "unknown error";
+}
+
+function userJournalErrorMessage(reason: string, err: any): string {
   if (reason === "journal_permission_denied") {
     return "permission denied reading user journal; add the OA process user to systemd-journal and restart OA";
   }
   if (reason === "journal_user_not_found" || reason === "journal_user_invalid") {
-    return err?.message;
+    return fallbackErrorMessage(err);
   }
   if (reason === "journalctl_not_found") {
     return "journalctl not found";
   }
-  return err?.stderr?.trim() || err?.message;
+  return fallbackErrorMessage(err);
 }
 
 function filterLines(
@@ -156,7 +176,6 @@ export async function collectStandaloneLogs(params: {
         continue;
       }
 
-      const filtered = filterLines(rawLines, excludePatterns, absStartMs, absEndMs);
       if (rawLines.length === 0 && journalScope(svc) === "user") {
         await writer.writeRecord({
           type: "log",
@@ -166,6 +185,8 @@ export async function collectStandaloneLogs(params: {
         });
         continue;
       }
+
+      const filtered = filterLines(rawLines, excludePatterns, absStartMs, absEndMs);
       for (const parsed of filtered) {
         totalLines++;
         if (totalLines > req.limits.maxTotalLogLines) return;

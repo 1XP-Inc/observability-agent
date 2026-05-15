@@ -461,6 +461,29 @@ describe("collectStandaloneLogs", () => {
     expect(records).toEqual([]);
   });
 
+  it("writes string error for non-Error user journal failures", async () => {
+    mockReadJournalLines.mockRejectedValue("journal failed");
+    const services: ServiceDef[] = [{
+      name: "beacond",
+      journal: "bera-beacond.service",
+      journalScope: "user",
+      journalUser: "ubuntu",
+    }];
+    const { writer, records } = makeWriter();
+
+    await collectStandaloneLogs({ writer, services, req: makeReq() });
+
+    expect(records[0]).toMatchObject({
+      type: "log_error",
+      service: "beacond",
+      journal: "bera-beacond.service",
+      journalScope: "user",
+      journalUser: "ubuntu",
+      reason: "journal_read_error",
+      error: "journal failed",
+    });
+  });
+
   it("writes log_error for unresolved user journal users", async () => {
     const err = new Error('journalUser "missing" was not found or is not a valid UID') as NodeJS.ErrnoException;
     err.code = "ENOUSER";
