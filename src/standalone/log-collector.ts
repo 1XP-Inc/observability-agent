@@ -33,7 +33,7 @@ function journalErrorReason(err: any): string {
 
 function userJournalErrorMessage(reason: string, err: any): string | undefined {
   if (reason === "journal_permission_denied") {
-    return "permission denied reading user journal; add observability_agent to systemd-journal and restart OA";
+    return "permission denied reading user journal; add the OA process user to systemd-journal and restart OA";
   }
   if (reason === "journal_user_not_found" || reason === "journal_user_invalid") {
     return err?.message;
@@ -157,7 +157,7 @@ export async function collectStandaloneLogs(params: {
       }
 
       const filtered = filterLines(rawLines, excludePatterns, absStartMs, absEndMs);
-      if (filtered.length === 0 && journalScope(svc) === "user") {
+      if (rawLines.length === 0 && journalScope(svc) === "user") {
         await writer.writeRecord({
           type: "log",
           ...journalRecordBase(svc),

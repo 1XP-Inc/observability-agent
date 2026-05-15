@@ -355,6 +355,20 @@ describe("loadConfig", () => {
     expect(cfg.services![0].journalUser).toBe("1000");
   });
 
+  it("OA_SERVICES journalUser 숫자 UID가 음수면 에러", () => {
+    process.env.OA_JWT_SECRET = "test-secret-key-for-config-tests!";
+    delete process.env.KUBERNETES_SERVICE_HOST;
+    process.env.OA_SERVICES = '[{"name":"svc","journal":"app.service","journalScope":"user","journalUser":-1}]';
+    expect(() => loadConfig()).toThrow("OA_SERVICES[0].journalUser must be a non-empty string or integer UID");
+  });
+
+  it("OA_SERVICES journalUser 숫자 UID 범위 초과 시 에러", () => {
+    process.env.OA_JWT_SECRET = "test-secret-key-for-config-tests!";
+    delete process.env.KUBERNETES_SERVICE_HOST;
+    process.env.OA_SERVICES = '[{"name":"svc","journal":"app.service","journalScope":"user","journalUser":4294967296}]';
+    expect(() => loadConfig()).toThrow("OA_SERVICES[0].journalUser must be a non-empty string or integer UID");
+  });
+
   it("OA_SERVICES journalScope 값이 잘못되면 에러", () => {
     process.env.OA_JWT_SECRET = "test-secret-key-for-config-tests!";
     delete process.env.KUBERNETES_SERVICE_HOST;

@@ -431,8 +431,34 @@ describe("collectStandaloneLogs", () => {
       journalScope: "user",
       journalUser: "ubuntu",
       reason: "journal_permission_denied",
-      error: "permission denied reading user journal; add observability_agent to systemd-journal and restart OA",
+      error: "permission denied reading user journal; add the OA process user to systemd-journal and restart OA",
     });
+  });
+
+  it("does not write No entries when user journal lines are filtered out", async () => {
+    mockReadJournalLines.mockResolvedValue([
+      "2026-05-15T03:45:01+0000 bera-beacond[123]: filtered",
+    ]);
+    const services: ServiceDef[] = [{
+      name: "beacond",
+      journal: "bera-beacond.service",
+      journalScope: "user",
+      journalUser: "ubuntu",
+    }];
+    const { writer, records } = makeWriter();
+
+    await collectStandaloneLogs({
+      writer,
+      services,
+      req: makeReq({
+        include: {
+          logs: { enabled: true, excludePatterns: ["filtered"] },
+          metrics: { enabled: false },
+        },
+      }),
+    });
+
+    expect(records).toEqual([]);
   });
 
   it("writes log_error for unresolved user journal users", async () => {

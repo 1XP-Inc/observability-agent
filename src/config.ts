@@ -1,5 +1,7 @@
 import type { ServiceDef } from "./standalone/types";
 
+const MAX_UID = 4_294_967_295;
+
 export type OAMode = "k8s" | "standalone";
 
 export type OALimits = {
@@ -120,7 +122,12 @@ function parseServices(): ServiceDef[] | undefined {
     }
     if (item.journalUser != null) {
       if (typeof item.journalUser === "number") {
-        if (!Number.isFinite(item.journalUser) || !Number.isInteger(item.journalUser)) {
+        if (
+          !Number.isFinite(item.journalUser) ||
+          !Number.isInteger(item.journalUser) ||
+          item.journalUser < 0 ||
+          item.journalUser > MAX_UID
+        ) {
           throw new Error(`OA_SERVICES[${i}].journalUser must be a non-empty string or integer UID`);
         }
         svc.journalUser = String(item.journalUser);
