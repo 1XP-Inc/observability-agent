@@ -1,4 +1,5 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
+import { createInterface } from "node:readline";
 import { promisify } from "node:util";
 import type { JournalScope } from "./types";
 
@@ -8,6 +9,7 @@ const TIMEOUT_MS = 10_000;
 const MIN_BUFFER = 10 * 1024 * 1024; // 10 MB floor
 const BYTES_PER_LINE = 1024; // 1 KB estimate per line
 const EXEC_ENV = { ...process.env, LANG: "C", LC_ALL: "C" };
+const STDERR_LIMIT = 1024 * 1024;
 
 function isJournalPermissionHint(stderr: unknown): boolean {
   return typeof stderr === "string" && /not seeing messages from other users|permission denied/i.test(stderr);
@@ -65,6 +67,69 @@ async function execJournalctl(args: string[], maxLines: number): Promise<{ stdou
   }
 }
 
+async function streamJournalctl(
+  args: string[],
+  onLine: (line: string) => void | Promise<void>,
+  opts?: { stripNoEntries?: boolean },
+): Promise<{ lineCount: number; stderr: string }> {
+  const child = spawn("journalctl", args, {
+    env: EXEC_ENV,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let stderr = "";
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    child.kill("SIGTERM");
+  }, TIMEOUT_MS);
+
+  child.stderr.on("data", (chunk: Buffer) => {
+    if (stderr.length >= STDERR_LIMIT) return;
+    stderr += chunk.toString("utf8").slice(0, STDERR_LIMIT - stderr.length);
+  });
+
+  let lineCount = 0;
+  const rl = createInterface({ input: child.stdout, crlfDelay: Infinity });
+  const stdoutDone = (async () => {
+    for await (const line of rl) {
+      if (!line.trim().length) continue;
+      if (opts?.stripNoEntries && /^--\s*No entries\s*--$/.test(line.trim())) continue;
+      lineCount++;
+      await onLine(line);
+    }
+  })();
+
+  let exitCode: number | null;
+  try {
+    exitCode = await new Promise<number | null>((resolve, reject) => {
+      child.once("error", reject);
+      child.on("close", (code) => resolve(code));
+    });
+  } catch (err) {
+    rl.close();
+    child.kill();
+    await stdoutDone.catch(() => {});
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+  await stdoutDone;
+
+  if (timedOut) {
+    throw codedError("journalctl timed out", "ETIMEDOUT");
+  }
+  if (isJournalPermissionHint(stderr)) {
+    throw toPermissionError(stderr);
+  }
+  if (exitCode !== 0) {
+    const err = new Error(stderr.trim() || `journalctl exited with code ${exitCode}`) as NodeJS.ErrnoException & { stderr?: string };
+    err.stderr = stderr;
+    throw err;
+  }
+
+  return { lineCount, stderr };
+}
+
 async function resolveJournalUserUid(journalUser: string): Promise<string> {
   const trimmed = journalUser.trim();
   if (!trimmed) {
@@ -100,6 +165,10 @@ function appendTimeArgs(args: string[], params: {
   } else if (params.sinceSeconds != null) {
     args.push("--since", `${params.sinceSeconds} seconds ago`);
   }
+}
+
+function appendMaxLinesArg(args: string[], maxLines?: number): void {
+  if (maxLines != null) args.push("-n", String(maxLines));
 }
 
 function journalLinesFromStdout(stdout: string, opts?: { stripNoEntries?: boolean }): string[] {
@@ -146,4 +215,49 @@ export async function readJournalLines(params: {
   appendTimeArgs(args, { sinceSeconds, sinceTime, untilTime });
   const result = await execJournalctl(args, maxLines);
   return journalLinesFromStdout(result.stdout);
+}
+
+export async function streamJournalLines(
+  params: {
+    unit: string;
+    journalScope?: JournalScope;
+    journalUser?: string;
+    maxLines?: number;
+    sinceSeconds?: number;
+    sinceTime?: string;
+    untilTime?: string;
+  },
+  onLine: (line: string) => void | Promise<void>,
+): Promise<number> {
+  const { unit, maxLines, sinceSeconds, sinceTime, untilTime } = params;
+  if (maxLines != null && maxLines <= 0) return 0;
+
+  if ((params.journalScope ?? "system") === "user") {
+    if (!params.journalUser) {
+      throw codedError("journalUser is required for user journal scope", "EINVAL");
+    }
+    const uid = await resolveJournalUserUid(params.journalUser);
+    const args = ["--user-unit", unit, `_UID=${uid}`, "--no-hostname", "--no-pager", "-o", "short-iso"];
+    appendMaxLinesArg(args, maxLines);
+    appendTimeArgs(args, { sinceSeconds, sinceTime, untilTime });
+
+    try {
+      const result = await streamJournalctl(args, onLine, { stripNoEntries: true });
+      if (result.lineCount > 0) return result.lineCount;
+    } catch (err: any) {
+      if (!isUnsupportedUserUnitError(err)) throw err;
+    }
+
+    const fallbackArgs = [`_UID=${uid}`, `_SYSTEMD_USER_UNIT=${unit}`, "--no-hostname", "--no-pager", "-o", "short-iso"];
+    appendMaxLinesArg(fallbackArgs, maxLines);
+    appendTimeArgs(fallbackArgs, { sinceSeconds, sinceTime, untilTime });
+    const result = await streamJournalctl(fallbackArgs, onLine, { stripNoEntries: true });
+    return result.lineCount;
+  }
+
+  const args = ["-u", unit, "--no-pager", "-o", "short-iso"];
+  appendMaxLinesArg(args, maxLines);
+  appendTimeArgs(args, { sinceSeconds, sinceTime, untilTime });
+  const result = await streamJournalctl(args, onLine);
+  return result.lineCount;
 }

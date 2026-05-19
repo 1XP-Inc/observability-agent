@@ -14,6 +14,14 @@ export function shouldExcludeLine(msg: string, excludePatterns: string[]): boole
   return false;
 }
 
+export function shouldIncludeLine(msg: string, includePatterns: string[]): boolean {
+  if (includePatterns.length === 0) return true;
+  for (const pat of includePatterns) {
+    if (msg.includes(pat)) return true;
+  }
+  return false;
+}
+
 export function parseLineTimeMs(ts: string | undefined): number | undefined {
   if (!ts) return undefined;
   const ms = Date.parse(ts);

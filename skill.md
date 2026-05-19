@@ -92,7 +92,7 @@ Admin response example:
 ## Bundle Request
 
 ### timeWindow (relative / absolute)
-OA supports two time window modes. Use only one at a time.
+OA supports two time window modes. Use only one at a time. In standalone mode, `timeWindow` is a journal-only selector.
 
 1) Relative:
 ```json
@@ -111,7 +111,7 @@ OA supports two time window modes. Use only one at a time.
 
 Rules:
 - Using both `sinceSeconds` and `start/end` → 400
-- In absolute mode, OA parses lines and drops those outside the range
+- In standalone mode, time windows apply only to journal sources; file sources use `tailLines`
 
 ### K8s Mode: selector-based (multiple Pods)
 ```json
@@ -156,13 +156,12 @@ Rules:
 ### Standalone Mode: service-based
 ```json
 {
-  "timeWindow": { "sinceSeconds": 600 },
   "target": {
     "kind": "services",
     "services": ["solana-validator", "rpc-node"]
   },
   "include": {
-    "logs": { "enabled": true, "excludePatterns": ["healthcheck"] },
+    "logs": { "enabled": true, "tailLines": 2000, "includePatterns": ["ERROR"], "excludePatterns": ["healthcheck"] },
     "metrics": { "enabled": true }
   },
   "limits": {
@@ -176,18 +175,31 @@ Standalone rules:
 - `target.services` is a required array of service names registered in `OA_SERVICES`
 - `kind` is `"services"` (auto-inferred when a services array is present)
 - `events` not supported in standalone
-- `previous`, `timestamps` options not available (file tail always reads latest N lines)
-- Logs are collected via `tail` from file paths configured per service and `journalctl -u` for configured systemd units
+- `previous`, `timestamps` options not available in standalone
+- File logs are collected via `tail -n <include.logs.tailLines>` from paths configured per service
+- Journal logs are collected via `journalctl`; they use `timeWindow` when supplied, otherwise `include.logs.tailLines`
+- `timeWindow` is accepted only when selected standalone services include a configured journal source; file logs are never time-filtered
+- OA applies include/exclude filters before the final `maxTotalLogLines`, then globally merges matching records by parsed timestamp
 - Clients cannot request arbitrary file paths or journal units; only registered `OA_SERVICES` entries are available
 - OA uses the current process OS permissions and does not elevate privileges
+
+Standalone log API constraints:
+
+| Field | Applies to | Behavior |
+|-------|------------|----------|
+| `include.logs.tailLines` | File logs, journal logs without `timeWindow` | Passed to `tail -n` for files and `journalctl -n` for journals |
+| `timeWindow.sinceSeconds` | Journal logs only | Relative journal window |
+| `timeWindow.start` / `timeWindow.end` | Journal logs only | Absolute journal window; both fields required together |
+| `limits.maxTotalLogLines` | All standalone logs | Final result budget after filtering and global merge |
 
 K8s selector bundle note:
 - Selector targets list matching pods internally before collecting logs/events/metrics.
 - Scoped tokens therefore need both `pods` capability and the requested data-source capabilities for selector bundles.
 
-### Log Line Exclude Filter (excludePatterns)
+### Log Line Filters (includePatterns / excludePatterns)
+`include.logs.includePatterns: string[]` keeps only lines containing at least one substring (like `grep`).
 `include.logs.excludePatterns: string[]` removes lines by substring match (like `grep -v`).
-Applied as a **post-filter** step alongside timeWindow filtering. Works the same in both K8s and standalone.
+Standalone applies include/exclude filters before the final `maxTotalLogLines` budget. `includePatterns` is standalone-only; `excludePatterns` also works in K8s mode.
 
 Example:
 ```json
@@ -195,6 +207,7 @@ Example:
   "include": {
     "logs": {
       "enabled": true,
+      "includePatterns": ["ERROR", "panic"],
       "excludePatterns": ["GET /healthz", "healthcheck"]
     }
   }
@@ -226,6 +239,7 @@ Example:
 | `log` | File log | service, file, ts, line, skipped?, reason? |
 | `log` | Journal log | service, journal, journalScope?, journalUser?, ts, line, skipped?, reason? |
 | `log_error` | User journal error | service, journal, journalScope, journalUser, ts, reason, error |
+| `log_summary` | Log budget/source summary | ts, lineLimited, matchedLogRecords, returnedLogRecords, sources[] |
 | `metrics_text` | Service metrics | service, url, ts, ok/skipped/error, content |
 
 Standalone log skip reasons:
@@ -270,7 +284,7 @@ OA writes a skip record in this case:
 ### Analysis Method
 - Group recurring errors by signature + count occurrences
 - Record first/last occurrence timestamps
-- Drill down: in K8s use narrower selector / single pod; in standalone use single service, shorter time window for follow-up bundles
+- Drill down: in K8s use narrower selector / single pod; in standalone use single service, lower `tailLines`, or a shorter journal `timeWindow`
 
 ---
 
@@ -294,19 +308,21 @@ OA writes a skip record in this case:
 
 ## Defaults
 
-### Common
-| Field | Default |
-|-------|---------|
-| sinceSeconds | 600 (10 min) |
-
 ### K8s Mode
 | Field | Default |
 |-------|---------|
+| sinceSeconds | 600 (10 min) |
 | tailLines | 2000 |
 | namespace | `*` (all) |
 | containers | all |
 | previous | true |
 | timestamps | true (forced true in absolute time mode) |
+
+### Standalone Mode
+| Field | Default |
+|-------|---------|
+| timeWindow | none (journal sources use `tailLines` unless requested) |
+| tailLines | 2000 |
 
 ## Limits
 
@@ -357,8 +373,9 @@ Standalone permission model:
 - Metrics URLs are operator-provided trusted configuration and may point at localhost or private networks for compatibility.
 
 Standalone time windows:
-- Relative file log requests read the latest configured line budget with `tail`; `sinceSeconds` does not seek historical file contents.
-- Absolute file and journal requests post-filter lines with parseable timestamps and keep lines without parseable timestamps.
+- File log requests read the latest configured line budget with `tail`; `sinceSeconds` and absolute windows do not seek or filter file contents.
+- Journal requests use either `timeWindow` (`--since`/`--until`) or the configured line budget, not both.
+- `timeWindow` on a standalone request is rejected when the selected services have no configured journal source.
 
 ---
 

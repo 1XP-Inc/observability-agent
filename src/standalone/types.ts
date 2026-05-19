@@ -14,13 +14,15 @@ export type StandaloneTarget =
   | { kind: "all" };
 
 export type StandaloneNormalizedRequest = {
-  timeWindow:
+  timeWindow?:
     | { kind: "relative"; sinceSeconds: number }
     | { kind: "absolute"; start: string; end: string };
   target: StandaloneTarget;
   include: {
     logs: {
       enabled: boolean;
+      tailLines: number;
+      includePatterns: string[];
       excludePatterns: string[];
     };
     metrics: { enabled: boolean };

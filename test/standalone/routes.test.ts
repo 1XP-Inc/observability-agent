@@ -172,6 +172,30 @@ describe("POST /v1/bundles (standalone)", () => {
     await app.close();
   });
 
+  it("normalizes standalone tailLines through the API", async () => {
+    const bundleManager = createMockBundleManager();
+    const { app } = buildApp({ bundleManagerOverride: bundleManager });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/bundles",
+      headers: authHeader(),
+      payload: {
+        target: { kind: "services", services: ["solana-validator"] },
+        include: { logs: { enabled: true, tailLines: 123 }, metrics: { enabled: false } },
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(bundleManager.create).toHaveBeenCalledWith(expect.objectContaining({
+      timeWindow: undefined,
+      include: expect.objectContaining({
+        logs: expect.objectContaining({ enabled: true, tailLines: 123 }),
+      }),
+    }));
+    await app.close();
+  });
+
   it("creates a bundle for a matching service scope and capabilities", async () => {
     const bundleManager = createMockBundleManager();
     const { app } = buildApp({ bundleManagerOverride: bundleManager });
@@ -241,6 +265,26 @@ describe("POST /v1/bundles (standalone)", () => {
     });
     expect(res.statusCode).toBe(400);
     expect(res.json().error).toContain("Unknown service");
+    await app.close();
+  });
+
+  it("returns 400 when standalone timeWindow targets only file log sources", async () => {
+    const bundleManager = createMockBundleManager();
+    const { app } = buildApp({ bundleManagerOverride: bundleManager });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/bundles",
+      headers: authHeader(),
+      payload: {
+        target: { kind: "services", services: ["rpc-node"] },
+        timeWindow: { sinceSeconds: 300 },
+      },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toContain("timeWindow is only supported for selected journal log sources");
+    expect(bundleManager.create).not.toHaveBeenCalled();
     await app.close();
   });
 
@@ -359,7 +403,7 @@ describe("GET /v1/bundles/:bundleId/download (standalone)", () => {
         timeWindow: { kind: "relative", sinceSeconds: 300 },
         target: { kind: "services", services: ["solana-validator"] },
         include: {
-          logs: { enabled: true, excludePatterns: [] },
+          logs: { enabled: true, tailLines: 2000, includePatterns: [], excludePatterns: [] },
           metrics: { enabled: false },
         },
         limits: {

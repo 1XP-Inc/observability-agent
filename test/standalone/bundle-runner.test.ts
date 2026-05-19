@@ -38,7 +38,7 @@ function makeReq(overrides?: Partial<StandaloneNormalizedRequest>): StandaloneNo
     timeWindow: { kind: "relative", sinceSeconds: 600 },
     target: { kind: "services", services: ["solana-validator"] },
     include: {
-      logs: { enabled: true, excludePatterns: [] },
+      logs: { enabled: true, tailLines: 2000, includePatterns: [], excludePatterns: [] },
       metrics: { enabled: true },
     },
     limits: { maxTotalLogLines: 50_000, sinceSecondsMax: 3600, metricsTimeoutMs: 2000 },
@@ -108,14 +108,14 @@ describe("runStandaloneBundle", () => {
 
   it("skips logs when disabled", async () => {
     makeWriter();
-    const job = makeJob({ params: makeReq({ include: { logs: { enabled: false, excludePatterns: [] }, metrics: { enabled: true } } }) });
+    const job = makeJob({ params: makeReq({ include: { logs: { enabled: false, tailLines: 2000, includePatterns: [], excludePatterns: [] }, metrics: { enabled: true } } }) });
     await runStandaloneBundle({ config, services, job });
     expect(collectStandaloneLogs).not.toHaveBeenCalled();
   });
 
   it("skips metrics when disabled", async () => {
     makeWriter();
-    const job = makeJob({ params: makeReq({ include: { logs: { enabled: true, excludePatterns: [] }, metrics: { enabled: false } } }) });
+    const job = makeJob({ params: makeReq({ include: { logs: { enabled: true, tailLines: 2000, includePatterns: [], excludePatterns: [] }, metrics: { enabled: false } } }) });
     await runStandaloneBundle({ config, services, job });
     expect(collectStandaloneMetrics).not.toHaveBeenCalled();
   });
