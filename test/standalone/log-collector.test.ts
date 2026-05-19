@@ -648,6 +648,34 @@ describe("collectStandaloneLogs", () => {
     });
   });
 
+  it("discards buffered journal lines when a stream fails", async () => {
+    const err = new Error("stream failed after partial output") as NodeJS.ErrnoException;
+    err.code = "ETIMEDOUT";
+    mockStreamJournalLines.mockImplementation(async (_params, onLine) => {
+      await onLine("2024-01-15T10:30:00+0000 host unit[1]: partial");
+      throw err;
+    });
+    const services: ServiceDef[] = [{ name: "svc1", journal: "nginx.service" }];
+    const { writer, records } = makeWriter();
+
+    await collectStandaloneLogs({ writer, services, req: makeReq() });
+
+    expect(logLineRecords(records)).toEqual([]);
+    expect(records[0]).toMatchObject({
+      type: "log",
+      service: "svc1",
+      journal: "nginx.service",
+      skipped: true,
+      reason: "journal_read_error",
+    });
+    expect(logSummary(records)).toMatchObject({
+      type: "log_summary",
+      matchedLogRecords: 0,
+      returnedLogRecords: 0,
+      sources: [expect.objectContaining({ rawLogRecords: 0, matchedLogRecords: 0, returnedLogRecords: 0 })],
+    });
+  });
+
   it("writes journal_permission_denied when EACCES", async () => {
     const err = new Error("not seeing messages from other users") as NodeJS.ErrnoException;
     err.code = "EACCES";

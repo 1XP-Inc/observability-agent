@@ -64,6 +64,15 @@ class TopLogCandidates {
     return [...this.heap];
   }
 
+  removeSource(sourceKey: string): void {
+    const next = this.heap.filter((candidate) => candidate.sourceKey !== sourceKey);
+    if (next.length === this.heap.length) return;
+    this.heap = next;
+    for (let i = Math.floor(this.heap.length / 2) - 1; i >= 0; i--) {
+      this.siftDown(i);
+    }
+  }
+
   private siftUp(index: number): void {
     while (index > 0) {
       const parent = Math.floor((index - 1) / 2);
@@ -294,6 +303,9 @@ export async function collectStandaloneLogs(params: {
         }
         await streamJournalLines(journalParams, (line) => addLine(state, base, line, sourceFilters));
       } catch (err: any) {
+        candidates.removeSource(state.key);
+        state.summary.rawLogRecords = 0;
+        state.summary.matchedLogRecords = 0;
         const reason = journalErrorReason(err);
         const error = journalScope(svc) === "user"
           ? userJournalErrorMessage(reason, err)
