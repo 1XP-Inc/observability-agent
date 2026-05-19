@@ -1,12 +1,10 @@
+import fs from "node:fs";
+import { createInterface } from "node:readline";
 import type { NdjsonGzipWriter } from "../bundle-writer";
 import { parseLogLine, shouldExcludeLine, shouldIncludeLine, parseLineTimeMs } from "../log-utils";
 import { isoNow } from "../util";
 import type { ServiceDef, StandaloneNormalizedRequest } from "./types";
-import { tailLines } from "./file-tail";
-import { readJournalLines } from "./journal-reader";
-
-const SOURCE_CANDIDATE_MULTIPLIER = 5;
-const MAX_SOURCE_CANDIDATE_LINES = 100_000;
+import { streamJournalLines } from "./journal-reader";
 
 type ParsedLine = { ts?: string; msg: string; sortMs?: number };
 
@@ -19,7 +17,6 @@ type LogSourceBase = {
 };
 
 type SourceSummary = LogSourceBase & {
-  sourceCandidateLimit: number;
   rawLogRecords: number;
   matchedLogRecords: number;
   returnedLogRecords: number;
@@ -47,6 +44,54 @@ type LogFilters = {
   startMs?: number;
   endMs?: number;
 };
+
+class TopLogCandidates {
+  private heap: LogCandidate[] = [];
+
+  constructor(private readonly maxSize: number) {}
+
+  add(candidate: LogCandidate): void {
+    if (this.maxSize <= 0) return;
+    if (this.heap.length < this.maxSize) {
+      this.heap.push(candidate);
+      this.siftUp(this.heap.length - 1);
+      return;
+    }
+    if (compareCandidateRank(candidate, this.heap[0]) <= 0) return;
+    this.heap[0] = candidate;
+    this.siftDown(0);
+  }
+
+  values(): LogCandidate[] {
+    return [...this.heap];
+  }
+
+  private siftUp(index: number): void {
+    while (index > 0) {
+      const parent = Math.floor((index - 1) / 2);
+      if (compareCandidateRank(this.heap[index], this.heap[parent]) >= 0) break;
+      [this.heap[index], this.heap[parent]] = [this.heap[parent], this.heap[index]];
+      index = parent;
+    }
+  }
+
+  private siftDown(index: number): void {
+    for (;;) {
+      const left = index * 2 + 1;
+      const right = left + 1;
+      let smallest = index;
+      if (left < this.heap.length && compareCandidateRank(this.heap[left], this.heap[smallest]) < 0) {
+        smallest = left;
+      }
+      if (right < this.heap.length && compareCandidateRank(this.heap[right], this.heap[smallest]) < 0) {
+        smallest = right;
+      }
+      if (smallest === index) break;
+      [this.heap[index], this.heap[smallest]] = [this.heap[smallest], this.heap[index]];
+      index = smallest;
+    }
+  }
+}
 
 function journalScope(svc: ServiceDef): "system" | "user" {
   return svc.journalScope ?? "system";
@@ -105,20 +150,16 @@ function userJournalErrorMessage(reason: string, err: any): string {
   return fallbackErrorMessage(err);
 }
 
-function filterLines(rawLines: string[], filters: LogFilters): ParsedLine[] {
-  const result: ParsedLine[] = [];
-  for (const line of rawLines) {
-    if (!line.length) continue;
-    const parsed = parseLogLine(line, true);
-    const sortMs = parseLineTimeMs(parsed.ts);
-    if (filters.startMs != null && filters.endMs != null && sortMs != null) {
-      if (sortMs < filters.startMs || sortMs > filters.endMs) continue;
-    }
-    if (!shouldIncludeLine(parsed.msg, filters.includePatterns)) continue;
-    if (shouldExcludeLine(parsed.msg, filters.excludePatterns)) continue;
-    result.push({ ...parsed, sortMs });
+function filterLine(line: string, filters: LogFilters): ParsedLine | undefined {
+  if (!line.length) return undefined;
+  const parsed = parseLogLine(line, true);
+  const sortMs = parseLineTimeMs(parsed.ts);
+  if (filters.startMs != null && filters.endMs != null && sortMs != null) {
+    if (sortMs < filters.startMs || sortMs > filters.endMs) return undefined;
   }
-  return result;
+  if (!shouldIncludeLine(parsed.msg, filters.includePatterns)) return undefined;
+  if (shouldExcludeLine(parsed.msg, filters.excludePatterns)) return undefined;
+  return { ...parsed, sortMs };
 }
 
 function timeBounds(req: StandaloneNormalizedRequest): Pick<LogFilters, "startMs" | "endMs"> {
@@ -140,20 +181,16 @@ function logSortMs(candidate: LogCandidate): number {
   return candidate.sortMs ?? Number.NEGATIVE_INFINITY;
 }
 
-function newestFirst(a: LogCandidate, b: LogCandidate): number {
-  const byTime = logSortMs(b) - logSortMs(a);
+function compareCandidateRank(a: LogCandidate, b: LogCandidate): number {
+  const byTime = logSortMs(a) - logSortMs(b);
   if (byTime !== 0) return byTime;
-  return b.sequence - a.sequence;
+  return a.sequence - b.sequence;
 }
 
 function outputOrder(a: LogCandidate, b: LogCandidate): number {
   const byTime = logSortMs(a) - logSortMs(b);
   if (byTime !== 0) return byTime;
   return a.sequence - b.sequence;
-}
-
-function sourceCandidateLimit(maxTotalLogLines: number): number {
-  return Math.min(maxTotalLogLines * SOURCE_CANDIDATE_MULTIPLIER, MAX_SOURCE_CANDIDATE_LINES);
 }
 
 export async function collectStandaloneLogs(params: {
@@ -168,10 +205,9 @@ export async function collectStandaloneLogs(params: {
     includePatterns: req.include.logs.includePatterns ?? [],
     excludePatterns: req.include.logs.excludePatterns ?? [],
   };
-  const sourceCandidateLimitValue = sourceCandidateLimit(req.limits.maxTotalLogLines);
   const sourceStates: SourceState[] = [];
   const sideRecords: Array<Record<string, unknown>> = [];
-  const candidates: LogCandidate[] = [];
+  const candidates = new TopLogCandidates(req.limits.maxTotalLogLines);
   let nextSourceIndex = 0;
   let nextSequence = 0;
 
@@ -180,7 +216,6 @@ export async function collectStandaloneLogs(params: {
       key: String(nextSourceIndex++),
       summary: {
         ...base,
-        sourceCandidateLimit: sourceCandidateLimitValue,
         rawLogRecords: 0,
         matchedLogRecords: 0,
         returnedLogRecords: 0,
@@ -192,24 +227,35 @@ export async function collectStandaloneLogs(params: {
     return state;
   }
 
-  function addCandidates(state: SourceState, base: LogSourceBase, rawLines: string[]): void {
-    const filtered = filterLines(rawLines, filters);
-    state.summary.rawLogRecords = rawLines.length;
-    state.summary.matchedLogRecords = filtered.length;
-    state.summary.sourceLineLimited = rawLines.length >= sourceCandidateLimitValue;
+  function addLine(state: SourceState, base: LogSourceBase, line: string): void {
+    if (!line.length) return;
+    state.summary.rawLogRecords++;
+    const parsed = filterLine(line, filters);
+    if (!parsed) return;
+    state.summary.matchedLogRecords++;
+    candidates.add({
+      sourceKey: state.key,
+      sequence: nextSequence++,
+      sortMs: parsed.sortMs,
+      record: {
+        type: "log",
+        ...base,
+        ts: parsed.ts,
+        line: parsed.msg,
+      },
+    });
+  }
 
-    for (const parsed of filtered) {
-      candidates.push({
-        sourceKey: state.key,
-        sequence: nextSequence++,
-        sortMs: parsed.sortMs,
-        record: {
-          type: "log",
-          ...base,
-          ts: parsed.ts,
-          line: parsed.msg,
-        },
-      });
+  async function scanFileLines(path: string, state: SourceState, base: LogSourceBase): Promise<void> {
+    const input = fs.createReadStream(path, { encoding: "utf8" });
+    const rl = createInterface({ input, crlfDelay: Infinity });
+    try {
+      for await (const line of rl) {
+        addLine(state, base, line);
+      }
+    } finally {
+      rl.close();
+      input.destroy();
     }
   }
 
@@ -219,9 +265,8 @@ export async function collectStandaloneLogs(params: {
         const base = { service: svc.name, file: logPath };
         const state = addSource(base);
 
-        let rawLines: string[];
         try {
-          rawLines = await tailLines(logPath, sourceCandidateLimitValue);
+          await scanFileLines(logPath, state, base);
         } catch (err: any) {
           const reason = err?.code === "ENOENT" ? "file_not_found" : "read_error";
           const error = err?.message;
@@ -238,8 +283,6 @@ export async function collectStandaloneLogs(params: {
           state.summary.error = error;
           continue;
         }
-
-        addCandidates(state, base, rawLines);
       }
     }
 
@@ -247,17 +290,15 @@ export async function collectStandaloneLogs(params: {
       const base = journalRecordBase(svc) as LogSourceBase;
       const state = addSource(base);
 
-      let rawLines: string[];
       try {
-        rawLines = await readJournalLines({
+        await streamJournalLines({
           unit: svc.journal,
           journalScope: journalScope(svc),
           journalUser: svc.journalUser,
-          maxLines: sourceCandidateLimitValue,
           sinceSeconds: req.timeWindow.kind === "relative" ? req.timeWindow.sinceSeconds : undefined,
           sinceTime: req.timeWindow.kind === "absolute" ? req.timeWindow.start : undefined,
           untilTime: req.timeWindow.kind === "absolute" ? req.timeWindow.end : undefined,
-        });
+        }, (line) => addLine(state, base, line));
       } catch (err: any) {
         const reason = journalErrorReason(err);
         const error = journalScope(svc) === "user"
@@ -287,7 +328,7 @@ export async function collectStandaloneLogs(params: {
         continue;
       }
 
-      if (rawLines.length === 0 && journalScope(svc) === "user") {
+      if (state.summary.rawLogRecords === 0 && journalScope(svc) === "user") {
         sideRecords.push({
           type: "log",
           ...journalRecordBase(svc),
@@ -296,15 +337,10 @@ export async function collectStandaloneLogs(params: {
         });
         continue;
       }
-
-      addCandidates(state, base, rawLines);
     }
   }
 
-  const selected = [...candidates]
-    .sort(newestFirst)
-    .slice(0, req.limits.maxTotalLogLines)
-    .sort(outputOrder);
+  const selected = candidates.values().sort(outputOrder);
   const returnedBySource = new Map<string, number>();
   for (const candidate of selected) {
     returnedBySource.set(candidate.sourceKey, (returnedBySource.get(candidate.sourceKey) ?? 0) + 1);
@@ -320,17 +356,16 @@ export async function collectStandaloneLogs(params: {
     await writer.writeRecord(candidate.record);
   }
 
-  const lineLimited = candidates.length > selected.length;
+  const matchedLogRecords = sourceStates.reduce((total, state) => total + state.summary.matchedLogRecords, 0);
+  const lineLimited = matchedLogRecords > selected.length;
   const hasSourceLimit = sourceStates.some((state) => state.summary.sourceLineLimited);
-  const hasSkippedSource = sourceStates.some((state) => state.summary.skipped);
-  if (lineLimited || hasSourceLimit || hasSkippedSource) {
+  if (sourceStates.length > 0) {
     await writer.writeRecord({
       type: "log_summary",
       ts: isoNow(),
       maxTotalLogLines: req.limits.maxTotalLogLines,
-      sourceCandidateLimit: sourceCandidateLimitValue,
       lineLimited: lineLimited || hasSourceLimit,
-      matchedLogRecords: candidates.length,
+      matchedLogRecords,
       returnedLogRecords: selected.length,
       sources: sourceStates.map((state) => state.summary),
     });

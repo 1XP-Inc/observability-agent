@@ -178,7 +178,7 @@ Standalone rules:
 - `events` not supported in standalone
 - `previous`, `timestamps` options not available in standalone
 - Logs are collected via `tail` from file paths configured per service and `journalctl -u` for configured systemd units
-- OA reads bounded candidates from every requested log source, applies time-window and include/exclude filters, globally merges matches by parsed timestamp, then applies `maxTotalLogLines`
+- OA streams every requested log source, applies time-window and include/exclude filters, globally merges matches by parsed timestamp, then applies `maxTotalLogLines`
 - Clients cannot request arbitrary file paths or journal units; only registered `OA_SERVICES` entries are available
 - OA uses the current process OS permissions and does not elevate privileges
 
