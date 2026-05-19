@@ -128,13 +128,12 @@ curl -X POST https://oa.example.com/v1/bundles \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
-    "timeWindow": { "sinceSeconds": 600 },
     "target": {
       "kind": "services",
       "services": ["solana-validator"]
     },
     "include": {
-      "logs":    { "enabled": true, "includePatterns": ["ERROR"], "excludePatterns": ["healthcheck"] },
+      "logs":    { "enabled": true, "tailLines": 2000, "includePatterns": ["ERROR"], "excludePatterns": ["healthcheck"] },
       "metrics": { "enabled": true }
     }
   }'
@@ -215,7 +214,7 @@ All configuration is via environment variables with sensible defaults:
 
 Standalone collection is allowlisted by `OA_SERVICES`: API clients choose registered service names, not arbitrary file paths, journal units, or metrics URLs. OA does not elevate privileges. File logs and journal logs are readable only when the OA process already has the required OS permissions. For systemd, `journalctl` can show all system and user journals only when the current process account already has journal access (for example, root or an account in `systemd-journal`). Without system journal access, OA returns a skipped `log` record with `reason: "journal_permission_denied"` when journalctl reports a permission problem. Without user journal access, or when `journalUser` cannot be resolved, OA returns a `log_error` record with `journalScope` and `journalUser`.
 
-Standalone log collection streams each configured file and journal source, applies time-window and include/exclude filtering, globally merges matches by parsed timestamp, then applies `maxTotalLogLines` as the final output budget. Relative file requests filter parseable timestamps by `sinceSeconds`; lines without parseable timestamps are retained for compatibility and sort behind timestamped lines.
+Standalone file logs are collected with `tail -n <include.logs.tailLines>` and are not time-filtered. Standalone journal logs use `timeWindow` when provided, otherwise they use `include.logs.tailLines`; `timeWindow` is accepted only for selected services with a configured journal source. Include/exclude filtering is applied before the final `maxTotalLogLines` output budget, and matching records are globally merged by parsed timestamp.
 
 Metrics URLs are configured by the operator and are fetched as-is for compatibility. Treat them as trusted configuration: OA does not block localhost, private network, or metadata-address targets by default.
 

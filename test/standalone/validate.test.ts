@@ -3,7 +3,7 @@ import { createMockConfig } from "../helpers";
 import type { ServiceDef } from "../../src/standalone/types";
 
 const services: ServiceDef[] = [
-  { name: "solana-validator", logs: ["/var/log/solana/validator.log"], metrics: "http://localhost:9090/metrics" },
+  { name: "solana-validator", logs: ["/var/log/solana/validator.log"], journal: "sol.service", metrics: "http://localhost:9090/metrics" },
   { name: "rpc-node", logs: ["/var/log/solana/rpc.log"] },
 ];
 
@@ -73,13 +73,13 @@ describe("normalizeStandaloneBundleRequest", () => {
   });
 
   // --- timeWindow ---
-  it("defaults to relative time window with config defaults", () => {
+  it("does not default standalone timeWindow", () => {
     const result = normalizeStandaloneBundleRequest(
       { target: { kind: "services", services: ["solana-validator"] } },
       cfg(),
       services,
     );
-    expect(result.timeWindow).toEqual({ kind: "relative", sinceSeconds: 600 });
+    expect(result.timeWindow).toBeUndefined();
   });
 
   it("uses sinceSeconds from request", () => {
@@ -147,6 +147,17 @@ describe("normalizeStandaloneBundleRequest", () => {
     )).toThrow("sinceSecondsMax");
   });
 
+  it("throws 400 when timeWindow is requested for file-only services", () => {
+    expect(() => normalizeStandaloneBundleRequest(
+      {
+        target: { kind: "services", services: ["rpc-node"] },
+        timeWindow: { sinceSeconds: 300 },
+      },
+      cfg(),
+      services,
+    )).toThrow("timeWindow is only supported for selected journal log sources");
+  });
+
   // --- include ---
   it("defaults include.logs.enabled to config default", () => {
     const result = normalizeStandaloneBundleRequest(
@@ -176,6 +187,38 @@ describe("normalizeStandaloneBundleRequest", () => {
       services,
     );
     expect(result.include.logs.enabled).toBe(false);
+  });
+
+  it("defaults include.logs.tailLines to config default", () => {
+    const result = normalizeStandaloneBundleRequest(
+      { target: { kind: "services", services: ["solana-validator"] } },
+      cfg(),
+      services,
+    );
+    expect(result.include.logs.tailLines).toBe(2000);
+  });
+
+  it("sets include.logs.tailLines from request", () => {
+    const result = normalizeStandaloneBundleRequest(
+      {
+        target: { kind: "services", services: ["solana-validator"] },
+        include: { logs: { tailLines: 500 } },
+      },
+      cfg(),
+      services,
+    );
+    expect(result.include.logs.tailLines).toBe(500);
+  });
+
+  it("rejects invalid include.logs.tailLines", () => {
+    expect(() => normalizeStandaloneBundleRequest(
+      {
+        target: { kind: "services", services: ["solana-validator"] },
+        include: { logs: { tailLines: "abc" } },
+      },
+      cfg(),
+      services,
+    )).toThrow("Invalid integer: include.logs.tailLines");
   });
 
   it("normalizes includePatterns", () => {
@@ -401,7 +444,7 @@ describe("normalizeStandaloneBundleRequest", () => {
         target: { kind: "services", services: ["solana-validator", "rpc-node"] },
         timeWindow: { sinceSeconds: 1800 },
         include: {
-          logs: { enabled: true, includePatterns: ["error"], excludePatterns: ["healthcheck"] },
+          logs: { enabled: true, tailLines: 1500, includePatterns: ["error"], excludePatterns: ["healthcheck"] },
           metrics: { enabled: false },
         },
       },
@@ -413,7 +456,7 @@ describe("normalizeStandaloneBundleRequest", () => {
       timeWindow: { kind: "relative", sinceSeconds: 1800 },
       target: { kind: "services", services: ["solana-validator", "rpc-node"] },
       include: {
-        logs: { enabled: true, includePatterns: ["error"], excludePatterns: ["healthcheck"] },
+        logs: { enabled: true, tailLines: 1500, includePatterns: ["error"], excludePatterns: ["healthcheck"] },
         metrics: { enabled: false },
       },
       limits: {

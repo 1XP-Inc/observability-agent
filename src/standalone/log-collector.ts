@@ -1,10 +1,9 @@
-import fs from "node:fs";
-import { createInterface } from "node:readline";
 import type { NdjsonGzipWriter } from "../bundle-writer";
 import { parseLogLine, shouldExcludeLine, shouldIncludeLine, parseLineTimeMs } from "../log-utils";
 import { isoNow } from "../util";
 import type { ServiceDef, StandaloneNormalizedRequest } from "./types";
 import { streamJournalLines } from "./journal-reader";
+import { tailLines } from "./file-tail";
 
 type ParsedLine = { ts?: string; msg: string; sortMs?: number };
 
@@ -161,17 +160,17 @@ function filterLine(line: string, filters: LogFilters): ParsedLine | undefined {
   return { ...parsed, sortMs };
 }
 
-function timeBounds(req: StandaloneNormalizedRequest): Pick<LogFilters, "startMs" | "endMs"> {
-  if (req.timeWindow.kind === "absolute") {
+function timeBounds(timeWindow: NonNullable<StandaloneNormalizedRequest["timeWindow"]>): Pick<LogFilters, "startMs" | "endMs"> {
+  if (timeWindow.kind === "absolute") {
     return {
-      startMs: Date.parse(req.timeWindow.start),
-      endMs: Date.parse(req.timeWindow.end),
+      startMs: Date.parse(timeWindow.start),
+      endMs: Date.parse(timeWindow.end),
     };
   }
 
   const endMs = Date.now();
   return {
-    startMs: endMs - req.timeWindow.sinceSeconds * 1000,
+    startMs: endMs - timeWindow.sinceSeconds * 1000,
     endMs,
   };
 }
@@ -195,13 +194,14 @@ export async function collectStandaloneLogs(params: {
 }): Promise<void> {
   const { writer, services, req } = params;
 
-  const filters: LogFilters = {
-    ...timeBounds(req),
+  const textFilters: LogFilters = {
     includePatterns: req.include.logs.includePatterns ?? [],
     excludePatterns: req.include.logs.excludePatterns ?? [],
   };
-  const fixedSinceTime = filters.startMs != null ? new Date(filters.startMs).toISOString() : undefined;
-  const fixedUntilTime = filters.endMs != null ? new Date(filters.endMs).toISOString() : undefined;
+  const journalTimeFilters: Pick<LogFilters, "startMs" | "endMs"> | undefined =
+    req.timeWindow ? timeBounds(req.timeWindow) : undefined;
+  const fixedSinceTime = journalTimeFilters?.startMs != null ? new Date(journalTimeFilters.startMs).toISOString() : undefined;
+  const fixedUntilTime = journalTimeFilters?.endMs != null ? new Date(journalTimeFilters.endMs).toISOString() : undefined;
   const sourceStates: SourceState[] = [];
   const sideRecords: Array<Record<string, unknown>> = [];
   const candidates = new TopLogCandidates(req.limits.maxTotalLogLines);
@@ -223,10 +223,10 @@ export async function collectStandaloneLogs(params: {
     return state;
   }
 
-  function addLine(state: SourceState, base: LogSourceBase, line: string): void {
+  function addLine(state: SourceState, base: LogSourceBase, line: string, sourceFilters: LogFilters): void {
     if (!line.length) return;
     state.summary.rawLogRecords++;
-    const parsed = filterLine(line, filters);
+    const parsed = filterLine(line, sourceFilters);
     if (!parsed) return;
     state.summary.matchedLogRecords++;
     candidates.add({
@@ -242,19 +242,6 @@ export async function collectStandaloneLogs(params: {
     });
   }
 
-  async function scanFileLines(path: string, state: SourceState, base: LogSourceBase): Promise<void> {
-    const input = fs.createReadStream(path, { encoding: "utf8" });
-    const rl = createInterface({ input, crlfDelay: Infinity });
-    try {
-      for await (const line of rl) {
-        addLine(state, base, line);
-      }
-    } finally {
-      rl.close();
-      input.destroy();
-    }
-  }
-
   for (const svc of services) {
     if (svc.logs && svc.logs.length > 0) {
       for (const logPath of svc.logs) {
@@ -262,7 +249,10 @@ export async function collectStandaloneLogs(params: {
         const state = addSource(base);
 
         try {
-          await scanFileLines(logPath, state, base);
+          const lines = await tailLines(logPath, req.include.logs.tailLines);
+          for (const line of lines) {
+            addLine(state, base, line, textFilters);
+          }
         } catch (err: any) {
           const reason = err?.code === "ENOENT" ? "file_not_found" : "read_error";
           const error = err?.message;
@@ -285,15 +275,24 @@ export async function collectStandaloneLogs(params: {
     if (svc.journal) {
       const base = journalRecordBase(svc) as LogSourceBase;
       const state = addSource(base);
+      const sourceFilters: LogFilters = {
+        ...textFilters,
+        ...(journalTimeFilters ?? {}),
+      };
 
       try {
-        await streamJournalLines({
+        const journalParams: Parameters<typeof streamJournalLines>[0] = {
           unit: svc.journal,
           journalScope: journalScope(svc),
           journalUser: svc.journalUser,
-          sinceTime: fixedSinceTime,
-          untilTime: fixedUntilTime,
-        }, (line) => addLine(state, base, line));
+        };
+        if (req.timeWindow) {
+          journalParams.sinceTime = fixedSinceTime;
+          journalParams.untilTime = fixedUntilTime;
+        } else {
+          journalParams.maxLines = req.include.logs.tailLines;
+        }
+        await streamJournalLines(journalParams, (line) => addLine(state, base, line, sourceFilters));
       } catch (err: any) {
         const reason = journalErrorReason(err);
         const error = journalScope(svc) === "user"

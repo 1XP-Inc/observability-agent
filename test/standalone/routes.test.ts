@@ -359,7 +359,7 @@ describe("GET /v1/bundles/:bundleId/download (standalone)", () => {
         timeWindow: { kind: "relative", sinceSeconds: 300 },
         target: { kind: "services", services: ["solana-validator"] },
         include: {
-          logs: { enabled: true, excludePatterns: [] },
+          logs: { enabled: true, tailLines: 2000, includePatterns: [], excludePatterns: [] },
           metrics: { enabled: false },
         },
         limits: {

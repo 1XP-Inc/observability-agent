@@ -92,7 +92,7 @@ Admin response example:
 ## Bundle Request
 
 ### timeWindow (relative / absolute)
-OA supports two time window modes. Use only one at a time.
+OA supports two time window modes. Use only one at a time. In standalone mode, `timeWindow` is a journal-only selector.
 
 1) Relative:
 ```json
@@ -111,7 +111,7 @@ OA supports two time window modes. Use only one at a time.
 
 Rules:
 - Using both `sinceSeconds` and `start/end` → 400
-- In absolute mode, OA parses lines and drops those outside the range
+- In standalone mode, time windows apply only to journal sources; file sources use `tailLines`
 
 ### K8s Mode: selector-based (multiple Pods)
 ```json
@@ -156,13 +156,12 @@ Rules:
 ### Standalone Mode: service-based
 ```json
 {
-  "timeWindow": { "sinceSeconds": 600 },
   "target": {
     "kind": "services",
     "services": ["solana-validator", "rpc-node"]
   },
   "include": {
-    "logs": { "enabled": true, "includePatterns": ["ERROR"], "excludePatterns": ["healthcheck"] },
+    "logs": { "enabled": true, "tailLines": 2000, "includePatterns": ["ERROR"], "excludePatterns": ["healthcheck"] },
     "metrics": { "enabled": true }
   },
   "limits": {
@@ -177,8 +176,10 @@ Standalone rules:
 - `kind` is `"services"` (auto-inferred when a services array is present)
 - `events` not supported in standalone
 - `previous`, `timestamps` options not available in standalone
-- Logs are collected via `tail` from file paths configured per service and `journalctl -u` for configured systemd units
-- OA streams every requested log source, applies time-window and include/exclude filters, globally merges matches by parsed timestamp, then applies `maxTotalLogLines`
+- File logs are collected via `tail -n <include.logs.tailLines>` from paths configured per service
+- Journal logs are collected via `journalctl`; they use `timeWindow` when supplied, otherwise `include.logs.tailLines`
+- `timeWindow` is accepted only when selected standalone services include a configured journal source; file logs are never time-filtered
+- OA applies include/exclude filters before the final `maxTotalLogLines`, then globally merges matching records by parsed timestamp
 - Clients cannot request arbitrary file paths or journal units; only registered `OA_SERVICES` entries are available
 - OA uses the current process OS permissions and does not elevate privileges
 
@@ -361,8 +362,8 @@ Standalone permission model:
 - Metrics URLs are operator-provided trusted configuration and may point at localhost or private networks for compatibility.
 
 Standalone time windows:
-- Relative file log requests read the latest configured line budget with `tail`; `sinceSeconds` does not seek historical file contents.
-- Absolute file and journal requests post-filter lines with parseable timestamps and keep lines without parseable timestamps.
+- File log requests read the latest configured line budget with `tail`; `sinceSeconds` and absolute windows do not seek or filter file contents.
+- Journal requests use either `timeWindow` (`--since`/`--until`) or the configured line budget, not both.
 
 ---
 

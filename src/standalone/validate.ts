@@ -73,7 +73,7 @@ export type StandaloneBundleRequest = {
     services?: string[];
   };
   include?: {
-    logs?: { enabled?: boolean; includePatterns?: string[]; excludePatterns?: string[] };
+    logs?: { enabled?: boolean; tailLines?: number; includePatterns?: string[]; excludePatterns?: string[] };
     metrics?: { enabled?: boolean };
   };
   limits?: {
@@ -91,62 +91,47 @@ export function normalizeStandaloneBundleRequest(
   if (!isRecord(input)) throw new HttpError(400, "Body must be a JSON object");
   const body = input as StandaloneBundleRequest;
 
-  // --- timeWindow ---
-  const timeWindowObj = isRecord(body.timeWindow) ? body.timeWindow : undefined;
   const limitsObj = isRecord(body.limits) ? body.limits : undefined;
 
+  // --- limits ---
+  const effMaxTotalLogLines = clampLimit(
+    "limits.maxTotalLogLines",
+    asInt("limits.maxTotalLogLines", limitsObj?.maxTotalLogLines) ?? config.hardLimits.maxTotalLogLines,
+    config.hardLimits.maxTotalLogLines,
+    1,
+  );
   const effSinceSecondsMax = clampLimit(
     "limits.sinceSecondsMax",
     asInt("limits.sinceSecondsMax", limitsObj?.sinceSecondsMax) ?? config.hardLimits.sinceSecondsMax,
     config.hardLimits.sinceSecondsMax,
     1,
   );
-
-  const hasSinceSeconds = timeWindowObj?.sinceSeconds != null;
-  const hasAbs = timeWindowObj?.start != null || timeWindowObj?.end != null;
-  if (hasSinceSeconds && hasAbs) {
-    throw new HttpError(400, "timeWindow cannot use sinceSeconds together with start/end");
-  }
-
-  let timeWindow: StandaloneNormalizedRequest["timeWindow"];
-  if (hasAbs) {
-    if (timeWindowObj?.start == null || timeWindowObj?.end == null) {
-      throw new HttpError(400, "timeWindow.start and timeWindow.end are required together");
-    }
-    const start = parseIso8601Z("timeWindow.start", timeWindowObj.start);
-    const end = parseIso8601Z("timeWindow.end", timeWindowObj.end);
-    if (end.ms < start.ms) throw new HttpError(400, "timeWindow.end must be >= timeWindow.start");
-    const windowSec = Math.ceil((end.ms - start.ms) / 1000);
-    if (windowSec > effSinceSecondsMax) {
-      throw new HttpError(400, `timeWindow range exceeds sinceSecondsMax (${windowSec} > ${effSinceSecondsMax})`);
-    }
-    timeWindow = { kind: "absolute", start: start.iso, end: end.iso };
-  } else {
-    const sinceSeconds = clampLimit(
-      "timeWindow.sinceSeconds",
-      asInt("timeWindow.sinceSeconds", timeWindowObj?.sinceSeconds) ?? config.defaults.sinceSeconds,
-      effSinceSecondsMax,
-      1,
-    );
-    timeWindow = { kind: "relative", sinceSeconds };
-  }
+  const effMetricsTimeoutMs = clampLimit(
+    "limits.metricsTimeoutMs",
+    asInt("limits.metricsTimeoutMs", limitsObj?.metricsTimeoutMs) ?? config.hardLimits.metricsTimeoutMs,
+    config.hardLimits.metricsTimeoutMs,
+    1,
+  );
 
   // --- target ---
   const targetObj = isRecord(body.target) ? body.target : undefined;
   if (!targetObj) throw new HttpError(400, "Missing required field: target");
 
   const serviceNames = asStringArray("target.services", targetObj.services);
-  const knownNames = new Set(knownServices.map((s) => s.name));
+  const knownByName = new Map(knownServices.map((s) => [s.name, s]));
 
   let target: StandaloneNormalizedRequest["target"];
+  const selectedServices: ServiceDef[] = [];
   if (targetObj.kind === "services" || serviceNames) {
     if (!serviceNames || serviceNames.length === 0) {
       throw new HttpError(400, "target.services must be a non-empty array");
     }
     for (const svc of serviceNames) {
-      if (!knownNames.has(svc)) {
+      const service = knownByName.get(svc);
+      if (!service) {
         throw new HttpError(400, `Unknown service: ${svc}`);
       }
+      selectedServices.push(service);
     }
     target = { kind: "services", services: serviceNames };
   } else {
@@ -160,6 +145,13 @@ export function normalizeStandaloneBundleRequest(
 
   const includeLogs = asBool("include.logs.enabled", logsObj?.enabled) ?? config.defaults.include.logs;
   const includeMetrics = asBool("include.metrics.enabled", metricsObj?.enabled) ?? config.defaults.include.metrics;
+
+  const tailLines = clampLimit(
+    "include.logs.tailLines",
+    asInt("include.logs.tailLines", logsObj?.tailLines) ?? config.defaults.logs.tailLines,
+    config.hardLimits.maxTotalLogLines,
+    0,
+  );
 
   const includePatterns = asStringArray("include.logs.includePatterns", logsObj?.includePatterns) ?? [];
   if (includePatterns.length > 50) {
@@ -177,25 +169,58 @@ export function normalizeStandaloneBundleRequest(
     if (p.length > 200) throw new HttpError(400, "include.logs.excludePatterns item too long (max 200)");
   }
 
-  // --- limits ---
-  const effMaxTotalLogLines = clampLimit(
-    "limits.maxTotalLogLines",
-    asInt("limits.maxTotalLogLines", limitsObj?.maxTotalLogLines) ?? config.hardLimits.maxTotalLogLines,
-    config.hardLimits.maxTotalLogLines,
-    1,
-  );
-  const effMetricsTimeoutMs = clampLimit(
-    "limits.metricsTimeoutMs",
-    asInt("limits.metricsTimeoutMs", limitsObj?.metricsTimeoutMs) ?? config.hardLimits.metricsTimeoutMs,
-    config.hardLimits.metricsTimeoutMs,
-    1,
-  );
+  // --- timeWindow ---
+  if (body.timeWindow != null && !isRecord(body.timeWindow)) {
+    throw new HttpError(400, "Invalid object: timeWindow");
+  }
+  const timeWindowObj = isRecord(body.timeWindow) ? body.timeWindow : undefined;
+  const hasJournalSource = selectedServices.some((svc) => Boolean(svc.journal));
+  if (includeLogs && timeWindowObj && !hasJournalSource) {
+    throw new HttpError(400, "timeWindow is only supported for selected journal log sources");
+  }
+
+  const hasSinceSeconds = timeWindowObj?.sinceSeconds != null;
+  const hasAbs = timeWindowObj?.start != null || timeWindowObj?.end != null;
+  if (hasSinceSeconds && hasAbs) {
+    throw new HttpError(400, "timeWindow cannot use sinceSeconds together with start/end");
+  }
+
+  let timeWindow: StandaloneNormalizedRequest["timeWindow"];
+  if (!timeWindowObj) {
+    timeWindow = undefined;
+  } else if (!hasSinceSeconds && !hasAbs) {
+    throw new HttpError(400, "timeWindow must include sinceSeconds or start/end");
+  } else if (hasAbs) {
+    if (timeWindowObj?.start == null || timeWindowObj?.end == null) {
+      throw new HttpError(400, "timeWindow.start and timeWindow.end are required together");
+    }
+    const start = parseIso8601Z("timeWindow.start", timeWindowObj.start);
+    const end = parseIso8601Z("timeWindow.end", timeWindowObj.end);
+    if (end.ms < start.ms) throw new HttpError(400, "timeWindow.end must be >= timeWindow.start");
+    const windowSec = Math.ceil((end.ms - start.ms) / 1000);
+    if (windowSec > effSinceSecondsMax) {
+      throw new HttpError(400, `timeWindow range exceeds sinceSecondsMax (${windowSec} > ${effSinceSecondsMax})`);
+    }
+    timeWindow = { kind: "absolute", start: start.iso, end: end.iso };
+  } else {
+    const sinceSecondsRaw = asInt("timeWindow.sinceSeconds", timeWindowObj.sinceSeconds);
+    if (sinceSecondsRaw == null) {
+      throw new HttpError(400, "timeWindow must include sinceSeconds or start/end");
+    }
+    const sinceSeconds = clampLimit(
+      "timeWindow.sinceSeconds",
+      sinceSecondsRaw,
+      effSinceSecondsMax,
+      1,
+    );
+    timeWindow = { kind: "relative", sinceSeconds };
+  }
 
   return {
     timeWindow,
     target,
     include: {
-      logs: { enabled: includeLogs, includePatterns, excludePatterns },
+      logs: { enabled: includeLogs, tailLines, includePatterns, excludePatterns },
       metrics: { enabled: includeMetrics },
     },
     limits: {

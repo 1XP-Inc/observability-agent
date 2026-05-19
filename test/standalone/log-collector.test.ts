@@ -28,7 +28,7 @@ function makeReq(overrides?: Partial<StandaloneNormalizedRequest>): StandaloneNo
     timeWindow: { kind: "absolute", start: "2020-01-01T00:00:00Z", end: "2030-01-01T00:00:00Z" },
     target: { kind: "services", services: ["svc1"] },
     include: {
-      logs: { enabled: true, includePatterns: [], excludePatterns: [] },
+      logs: { enabled: true, tailLines: 2000, includePatterns: [], excludePatterns: [] },
       metrics: { enabled: false },
     },
     limits: { maxTotalLogLines: 50_000, sinceSecondsMax: 3600, metricsTimeoutMs: 2000 },
@@ -172,15 +172,11 @@ describe("collectStandaloneLogs", () => {
     fs.unlinkSync(logFile);
   });
 
-  it("finds absolute-window file matches that are not near the end of the file", async () => {
+  it("tails file logs by line count without applying absolute time windows", async () => {
     const logFile = tmpLog(
-      "2024-01-01T00:00:00Z before\n" +
-      "2024-01-01T12:00:00Z inside\n" +
+      "2024-01-01T12:00:00Z inside-window\n" +
       "2024-01-02T00:00:01Z after-1\n" +
-      "2024-01-02T00:00:02Z after-2\n" +
-      "2024-01-02T00:00:03Z after-3\n" +
-      "2024-01-02T00:00:04Z after-4\n" +
-      "2024-01-02T00:00:05Z after-5\n"
+      "2024-01-02T00:00:02Z after-2\n"
     );
     const services: ServiceDef[] = [{ name: "svc1", logs: [logFile] }];
     const { writer, records } = makeWriter();
@@ -190,16 +186,16 @@ describe("collectStandaloneLogs", () => {
       services,
       req: makeReq({
         timeWindow: { kind: "absolute", start: "2024-01-01T06:00:00Z", end: "2024-01-02T00:00:00Z" },
-        limits: { maxTotalLogLines: 1, sinceSecondsMax: 3600, metricsTimeoutMs: 2000 },
+        include: { logs: { enabled: true, tailLines: 2, includePatterns: [], excludePatterns: [] }, metrics: { enabled: false } },
       }),
     });
 
-    expect(logLineRecords(records).map((r: any) => r.line)).toEqual(["inside"]);
+    expect(logLineRecords(records).map((r: any) => r.line)).toEqual(["after-1", "after-2"]);
     expect(logSummary(records)).toMatchObject({
       type: "log_summary",
       lineLimited: false,
-      matchedLogRecords: 1,
-      returnedLogRecords: 1,
+      matchedLogRecords: 2,
+      returnedLogRecords: 2,
     });
 
     fs.unlinkSync(logFile);
@@ -230,7 +226,7 @@ describe("collectStandaloneLogs", () => {
     fs.unlinkSync(logFile);
   });
 
-  it("filters file logs by relative sinceSeconds", async () => {
+  it("tails file logs by line count without applying relative sinceSeconds", async () => {
     const oldTs = new Date(Date.now() - 1_200_000).toISOString();
     const recentTs = new Date(Date.now() - 60_000).toISOString();
     const logFile = tmpLog(`${oldTs} old\n${recentTs} recent\n`);
@@ -240,21 +236,24 @@ describe("collectStandaloneLogs", () => {
     await collectStandaloneLogs({
       writer,
       services,
-      req: makeReq({ timeWindow: { kind: "relative", sinceSeconds: 600 } }),
+      req: makeReq({
+        timeWindow: { kind: "relative", sinceSeconds: 600 },
+        include: { logs: { enabled: true, tailLines: 2, includePatterns: [], excludePatterns: [] }, metrics: { enabled: false } },
+      }),
     });
 
-    expect(logLineRecords(records).map((r: any) => r.line)).toEqual(["recent"]);
+    expect(logLineRecords(records).map((r: any) => r.line)).toEqual(["old", "recent"]);
 
     fs.unlinkSync(logFile);
   });
 
-  it("filters by absolute time window", async () => {
-    const logFile = tmpLog(
-      "2024-01-01T00:00:00Z before\n" +
-      "2024-01-01T12:00:00Z inside\n" +
-      "2024-01-02T00:00:01Z after\n"
-    );
-    const services: ServiceDef[] = [{ name: "svc1", logs: [logFile] }];
+  it("applies absolute time windows to journal logs", async () => {
+    mockJournalLines([
+      "2024-01-01T00:00:00+0000 host unit[1]: before",
+      "2024-01-01T12:00:00+0000 host unit[1]: inside",
+      "2024-01-02T00:00:01+0000 host unit[1]: after",
+    ]);
+    const services: ServiceDef[] = [{ name: "svc1", journal: "app.service" }];
     const { writer, records } = makeWriter();
 
     await collectStandaloneLogs({
@@ -267,9 +266,7 @@ describe("collectStandaloneLogs", () => {
 
     const logRecords = logLineRecords(records);
     expect(logRecords.length).toBe(1);
-    expect(logRecords[0].line).toBe("inside");
-
-    fs.unlinkSync(logFile);
+    expect(logRecords[0].line).toBe("host unit[1]: inside");
   });
 
   it("includes lines without timestamp in absolute mode", async () => {
@@ -408,10 +405,34 @@ describe("collectStandaloneLogs", () => {
         sinceTime: "2024-01-01T00:00:00.000Z",
         untilTime: "2024-01-01T00:10:00.000Z",
       }), expect.any(Function));
+      expect(mockStreamJournalLines.mock.calls[0][0]).not.toHaveProperty("maxLines");
       expect(logLineRecords(records).map((r: any) => r.line)).toEqual(["host unit[1]: recent"]);
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("uses tailLines for journal sources when no time window is requested", async () => {
+    mockJournalLines([
+      "2024-01-15T10:30:00+0000 host unit[1]: journal-line",
+    ]);
+    const services: ServiceDef[] = [{ name: "svc1", journal: "app.service" }];
+    const { writer, records } = makeWriter();
+
+    await collectStandaloneLogs({
+      writer,
+      services,
+      req: makeReq({
+        timeWindow: undefined,
+        include: { logs: { enabled: true, tailLines: 25, includePatterns: [], excludePatterns: [] }, metrics: { enabled: false } },
+      }),
+    });
+
+    expect(mockStreamJournalLines).toHaveBeenCalledWith(expect.objectContaining({
+      unit: "app.service",
+      maxLines: 25,
+    }), expect.any(Function));
+    expect(logLineRecords(records).map((r: any) => r.line)).toEqual(["host unit[1]: journal-line"]);
   });
 
   it("collects user journal logs with scope metadata", async () => {
