@@ -20,7 +20,6 @@ type SourceSummary = LogSourceBase & {
   rawLogRecords: number;
   matchedLogRecords: number;
   returnedLogRecords: number;
-  sourceLineLimited: boolean;
   skipped?: boolean;
   reason?: string;
   error?: string;
@@ -177,19 +176,15 @@ function timeBounds(req: StandaloneNormalizedRequest): Pick<LogFilters, "startMs
   };
 }
 
-function logSortMs(candidate: LogCandidate): number {
-  return candidate.sortMs ?? Number.NEGATIVE_INFINITY;
-}
-
 function compareCandidateRank(a: LogCandidate, b: LogCandidate): number {
-  const byTime = logSortMs(a) - logSortMs(b);
-  if (byTime !== 0) return byTime;
-  return a.sequence - b.sequence;
-}
-
-function outputOrder(a: LogCandidate, b: LogCandidate): number {
-  const byTime = logSortMs(a) - logSortMs(b);
-  if (byTime !== 0) return byTime;
+  if (a.sortMs != null && b.sortMs != null) {
+    const byTime = a.sortMs - b.sortMs;
+    if (byTime !== 0) return byTime;
+  } else if (a.sortMs != null) {
+    return 1;
+  } else if (b.sortMs != null) {
+    return -1;
+  }
   return a.sequence - b.sequence;
 }
 
@@ -205,6 +200,8 @@ export async function collectStandaloneLogs(params: {
     includePatterns: req.include.logs.includePatterns ?? [],
     excludePatterns: req.include.logs.excludePatterns ?? [],
   };
+  const fixedSinceTime = filters.startMs != null ? new Date(filters.startMs).toISOString() : undefined;
+  const fixedUntilTime = filters.endMs != null ? new Date(filters.endMs).toISOString() : undefined;
   const sourceStates: SourceState[] = [];
   const sideRecords: Array<Record<string, unknown>> = [];
   const candidates = new TopLogCandidates(req.limits.maxTotalLogLines);
@@ -219,7 +216,6 @@ export async function collectStandaloneLogs(params: {
         rawLogRecords: 0,
         matchedLogRecords: 0,
         returnedLogRecords: 0,
-        sourceLineLimited: false,
         ...initial,
       },
     };
@@ -295,9 +291,8 @@ export async function collectStandaloneLogs(params: {
           unit: svc.journal,
           journalScope: journalScope(svc),
           journalUser: svc.journalUser,
-          sinceSeconds: req.timeWindow.kind === "relative" ? req.timeWindow.sinceSeconds : undefined,
-          sinceTime: req.timeWindow.kind === "absolute" ? req.timeWindow.start : undefined,
-          untilTime: req.timeWindow.kind === "absolute" ? req.timeWindow.end : undefined,
+          sinceTime: fixedSinceTime,
+          untilTime: fixedUntilTime,
         }, (line) => addLine(state, base, line));
       } catch (err: any) {
         const reason = journalErrorReason(err);
@@ -340,7 +335,7 @@ export async function collectStandaloneLogs(params: {
     }
   }
 
-  const selected = candidates.values().sort(outputOrder);
+  const selected = candidates.values().sort(compareCandidateRank);
   const returnedBySource = new Map<string, number>();
   for (const candidate of selected) {
     returnedBySource.set(candidate.sourceKey, (returnedBySource.get(candidate.sourceKey) ?? 0) + 1);
@@ -358,13 +353,12 @@ export async function collectStandaloneLogs(params: {
 
   const matchedLogRecords = sourceStates.reduce((total, state) => total + state.summary.matchedLogRecords, 0);
   const lineLimited = matchedLogRecords > selected.length;
-  const hasSourceLimit = sourceStates.some((state) => state.summary.sourceLineLimited);
   if (sourceStates.length > 0) {
     await writer.writeRecord({
       type: "log_summary",
       ts: isoNow(),
       maxTotalLogLines: req.limits.maxTotalLogLines,
-      lineLimited: lineLimited || hasSourceLimit,
+      lineLimited,
       matchedLogRecords,
       returnedLogRecords: selected.length,
       sources: sourceStates.map((state) => state.summary),

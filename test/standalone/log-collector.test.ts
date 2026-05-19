@@ -291,6 +291,28 @@ describe("collectStandaloneLogs", () => {
     fs.unlinkSync(logFile);
   });
 
+  it("keeps the newest untimestamped lines when the final limit is reached", async () => {
+    const logFile = tmpLog("first\nsecond\nthird\n");
+    const services: ServiceDef[] = [{ name: "svc1", logs: [logFile] }];
+    const { writer, records } = makeWriter();
+
+    await collectStandaloneLogs({
+      writer,
+      services,
+      req: makeReq({ limits: { maxTotalLogLines: 2, sinceSecondsMax: 3600, metricsTimeoutMs: 2000 } }),
+    });
+
+    expect(logLineRecords(records).map((r: any) => r.line)).toEqual(["second", "third"]);
+    expect(logSummary(records)).toMatchObject({
+      type: "log_summary",
+      lineLimited: true,
+      matchedLogRecords: 3,
+      returnedLogRecords: 2,
+    });
+
+    fs.unlinkSync(logFile);
+  });
+
   it("handles multiple services and files", async () => {
     const f1 = tmpLog("2024-01-01T00:00:00Z svc1-line\n");
     const f2 = tmpLog("2024-01-01T00:00:00Z svc2-line\n");
@@ -363,6 +385,33 @@ describe("collectStandaloneLogs", () => {
       journal: "nginx.service",
       line: "host nginx[123]: request received",
     });
+  });
+
+  it("uses fixed relative time bounds for journal sources", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2024-01-01T00:10:00.000Z"));
+    try {
+      mockJournalLines([
+        "2024-01-01T00:09:00+0000 host unit[1]: recent",
+      ]);
+      const services: ServiceDef[] = [{ name: "svc1", journal: "app.service" }];
+      const { writer, records } = makeWriter();
+
+      await collectStandaloneLogs({
+        writer,
+        services,
+        req: makeReq({ timeWindow: { kind: "relative", sinceSeconds: 600 } }),
+      });
+
+      expect(mockStreamJournalLines).toHaveBeenCalledWith(expect.objectContaining({
+        unit: "app.service",
+        sinceTime: "2024-01-01T00:00:00.000Z",
+        untilTime: "2024-01-01T00:10:00.000Z",
+      }), expect.any(Function));
+      expect(logLineRecords(records).map((r: any) => r.line)).toEqual(["host unit[1]: recent"]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("collects user journal logs with scope metadata", async () => {
