@@ -139,12 +139,14 @@ curl -X POST https://oa.example.com/v1/bundles \
   }'
 ```
 
+Standalone targets can also use `{ "target": { "kind": "all" } }` to collect from every service registered in `OA_SERVICES`.
+
 ### NDJSON Record Types
 
 | Type | Mode | Description |
 |------|------|-------------|
 | `meta` | Both | Bundle metadata (bundleId, params, timestamps) |
-| `log` | K8s | Container log line (namespace, pod, container, ts, line) |
+| `log` | K8s | Container log line (namespace, pod, container, ts, line, previous?) |
 | `log` | Standalone | File log line (service, file, ts, line) |
 | `log` | Standalone | Journal log line (service, journal, ts, line, journalScope?, journalUser?) |
 | `log_error` | Standalone | User journal configuration or permission error (service, journal, journalScope, journalUser, ts, reason, error) |
@@ -214,15 +216,15 @@ All configuration is via environment variables with sensible defaults:
 
 Standalone collection is allowlisted by `OA_SERVICES`: API clients choose registered service names, not arbitrary file paths, journal units, or metrics URLs. OA does not elevate privileges. File logs and journal logs are readable only when the OA process already has the required OS permissions. For systemd, `journalctl` can show all system and user journals only when the current process account already has journal access (for example, root or an account in `systemd-journal`). Without system journal access, OA returns a skipped `log` record with `reason: "journal_permission_denied"` when journalctl reports a permission problem. Without user journal access, or when `journalUser` cannot be resolved, OA returns a `log_error` record with `journalScope` and `journalUser`.
 
-Standalone file logs are collected with `tail -n <include.logs.tailLines>` and are not time-filtered. Standalone journal logs use either `timeWindow` (`--since`/`--until`) or `include.logs.tailLines` (`-n`), not both. `timeWindow` is accepted only for selected services with a configured journal source. Include/exclude filtering is applied before the final `maxTotalLogLines` output budget, and matching records are globally merged by parsed timestamp.
+Standalone file logs are collected with `tail -n <include.logs.tailLines>` and are not time-filtered. Standalone journal logs use either `timeWindow` (`--since`/`--until`) or `include.logs.tailLines` (`-n`), not both. When logs are enabled, `timeWindow` is accepted only for selected services with a configured journal source. Include/exclude filtering is applied before the final `maxTotalLogLines` output budget; matching records are globally merged by parsed timestamp when both compared records have timestamps, otherwise by source read order.
 
 Standalone log request constraints:
 
 | Field | Applies to | Behavior |
 |-------|------------|----------|
 | `include.logs.tailLines` | File logs, journal logs without `timeWindow` | Source read budget; passed to `tail -n` for files and `journalctl -n` for journals |
-| `timeWindow.sinceSeconds` | Journal logs only | Relative journal window; rejected when selected services have no journal source |
-| `timeWindow.start` / `timeWindow.end` | Journal logs only | Absolute journal window; both fields are required together |
+| `timeWindow.sinceSeconds` | Journal logs only | Relative journal window; rejected when logs are enabled and selected services have no journal source |
+| `timeWindow.start` / `timeWindow.end` | Journal logs only | Absolute journal window; both fields are required together; rejected when logs are enabled and selected services have no journal source |
 | `limits.maxTotalLogLines` | All standalone logs | Final returned-record budget after include/exclude filtering and cross-source merge |
 
 Metrics URLs are configured by the operator and are fetched as-is for compatibility. Treat them as trusted configuration: OA does not block localhost, private network, or metadata-address targets by default.

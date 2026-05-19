@@ -8,10 +8,13 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 
 function asInt(name: string, v: unknown): number | undefined {
   if (v == null) return undefined;
-  if (typeof v === "number" && Number.isFinite(v)) return Math.trunc(v);
-  if (typeof v === "string" && v.trim().length) {
-    const n = Number.parseInt(v, 10);
-    if (Number.isFinite(n) && !Number.isNaN(n)) return n;
+  if (typeof v === "number" && Number.isSafeInteger(v)) return v;
+  if (typeof v === "string") {
+    const s = v.trim();
+    if (/^[+-]?\d+$/.test(s)) {
+      const n = Number(s);
+      if (Number.isSafeInteger(n)) return n;
+    }
   }
   throw new HttpError(400, `Invalid integer: ${name}`);
 }
@@ -77,6 +80,9 @@ export function normalizeBundleRequest(input: unknown, config: OAConfig): Normal
   if (!isRecord(input)) throw new HttpError(400, "Body must be a JSON object");
   const body = input as BundleRequest;
 
+  if (body.timeWindow != null && !isRecord(body.timeWindow)) {
+    throw new HttpError(400, "Invalid object: timeWindow");
+  }
   const timeWindowObj = isRecord(body.timeWindow) ? body.timeWindow : undefined;
   const limitsObj = isRecord(body.limits) ? body.limits : undefined;
   const effSinceSecondsMax = clampLimit(

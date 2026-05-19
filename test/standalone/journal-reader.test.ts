@@ -1,8 +1,11 @@
 import { vi } from "vitest";
+import { EventEmitter } from "node:events";
+import { PassThrough } from "node:stream";
 
 // Use vi.hoisted so mockExecFileAsync is available inside vi.mock factory
-const { mockExecFileAsync } = vi.hoisted(() => ({
+const { mockExecFileAsync, mockSpawn } = vi.hoisted(() => ({
   mockExecFileAsync: vi.fn(),
+  mockSpawn: vi.fn(),
 }));
 
 // Mock child_process.execFile with proper promisify custom symbol
@@ -10,10 +13,10 @@ const { mockExecFileAsync } = vi.hoisted(() => ({
 vi.mock("node:child_process", () => {
   const fn = vi.fn();
   fn[Symbol.for("nodejs.util.promisify.custom")] = mockExecFileAsync;
-  return { execFile: fn };
+  return { execFile: fn, spawn: mockSpawn };
 });
 
-import { readJournalLines } from "../../src/standalone/journal-reader";
+import { readJournalLines, streamJournalLines } from "../../src/standalone/journal-reader";
 
 function setupSuccess(stdout: string) {
   mockExecFileAsync.mockResolvedValue({ stdout, stderr: "" });
@@ -21,6 +24,25 @@ function setupSuccess(stdout: string) {
 
 function setupError(err: NodeJS.ErrnoException) {
   mockExecFileAsync.mockRejectedValue(err);
+}
+
+function setupSpawnResult(stdout: string, stderr: string = "", code: number | null = 0) {
+  mockSpawn.mockImplementation(() => {
+    const child = new EventEmitter() as EventEmitter & {
+      stdout: PassThrough;
+      stderr: PassThrough;
+      kill: ReturnType<typeof vi.fn>;
+    };
+    child.stdout = new PassThrough();
+    child.stderr = new PassThrough();
+    child.kill = vi.fn();
+    queueMicrotask(() => {
+      child.stderr.end(stderr);
+      child.stdout.end(stdout);
+      child.emit("close", code);
+    });
+    return child;
+  });
 }
 
 function lastCallArgs(): string[] {
@@ -395,5 +417,41 @@ describe("readJournalLines", () => {
         maxLines: 100,
       }),
     ).rejects.toMatchObject({ code: "EACCES" });
+  });
+});
+
+describe("streamJournalLines", () => {
+  it("strips system journal No entries output in the streaming path", async () => {
+    setupSpawnResult("-- No entries --\n");
+    const lines: string[] = [];
+
+    const count = await streamJournalLines(
+      { unit: "nginx.service", maxLines: 100 },
+      (line) => { lines.push(line); },
+    );
+
+    expect(count).toBe(0);
+    expect(lines).toEqual([]);
+    expect(mockSpawn).toHaveBeenCalledWith(
+      "journalctl",
+      expect.arrayContaining(["-u", "nginx.service", "-n", "100", "--no-pager", "-o", "short-iso"]),
+      expect.objectContaining({ stdio: ["ignore", "pipe", "pipe"] }),
+    );
+  });
+
+  it("streams system journal lines after filtering only No entries markers", async () => {
+    setupSpawnResult(
+      "-- No entries --\n" +
+      "2024-01-15T10:30:00+0000 host nginx[123]: request received\n",
+    );
+    const lines: string[] = [];
+
+    const count = await streamJournalLines(
+      { unit: "nginx.service", maxLines: 100 },
+      async (line) => { lines.push(line); },
+    );
+
+    expect(count).toBe(1);
+    expect(lines).toEqual(["2024-01-15T10:30:00+0000 host nginx[123]: request received"]);
   });
 });

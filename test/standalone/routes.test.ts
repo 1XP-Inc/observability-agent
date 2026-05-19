@@ -196,6 +196,27 @@ describe("POST /v1/bundles (standalone)", () => {
     await app.close();
   });
 
+  it("creates a bundle for target kind all", async () => {
+    const bundleManager = createMockBundleManager();
+    const { app } = buildApp({ bundleManagerOverride: bundleManager });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/bundles",
+      headers: authHeader(),
+      payload: {
+        target: { kind: "all" },
+        include: { logs: { enabled: true }, metrics: { enabled: false } },
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(bundleManager.create).toHaveBeenCalledWith(expect.objectContaining({
+      target: { kind: "all" },
+    }));
+    await app.close();
+  });
+
   it("creates a bundle for a matching service scope and capabilities", async () => {
     const bundleManager = createMockBundleManager();
     const { app } = buildApp({ bundleManagerOverride: bundleManager });
@@ -223,6 +244,25 @@ describe("POST /v1/bundles (standalone)", () => {
     });
     expect(res.statusCode).toBe(403);
     expect(res.json().error).toBe("forbidden");
+    expect(bundleManager.create).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it("rejects target all when a scoped token cannot access every service", async () => {
+    const bundleManager = createMockBundleManager();
+    const { app } = buildApp({ bundleManagerOverride: bundleManager });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/bundles",
+      headers: authHeader({ allowedServices: ["solana-*"], capabilities: ["logs"] }),
+      payload: {
+        target: { kind: "all" },
+        include: { logs: { enabled: true }, metrics: { enabled: false } },
+      },
+    });
+
+    expect(res.statusCode).toBe(403);
     expect(bundleManager.create).not.toHaveBeenCalled();
     await app.close();
   });
@@ -285,6 +325,53 @@ describe("POST /v1/bundles (standalone)", () => {
     expect(res.statusCode).toBe(400);
     expect(res.json().error).toContain("timeWindow is only supported for selected journal log sources");
     expect(bundleManager.create).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it("returns 403 before source-type validation for unauthorized file-only timeWindow targets", async () => {
+    const bundleManager = createMockBundleManager();
+    const { app } = buildApp({ bundleManagerOverride: bundleManager });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/bundles",
+      headers: authHeader({ allowedServices: ["solana-*"], capabilities: ["logs"] }),
+      payload: {
+        target: { kind: "services", services: ["rpc-node"] },
+        timeWindow: { sinceSeconds: 300 },
+        include: { logs: { enabled: true }, metrics: { enabled: false } },
+      },
+    });
+
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error).toBe("forbidden");
+    expect(bundleManager.create).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it("allows metrics-only file services with timeWindow because logs are disabled", async () => {
+    const bundleManager = createMockBundleManager();
+    const { app } = buildApp({ bundleManagerOverride: bundleManager });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/bundles",
+      headers: authHeader({ allowedServices: ["rpc-*"], capabilities: ["metrics"] }),
+      payload: {
+        target: { kind: "services", services: ["rpc-node"] },
+        timeWindow: { sinceSeconds: 300 },
+        include: { logs: { enabled: false }, metrics: { enabled: true } },
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(bundleManager.create).toHaveBeenCalledWith(expect.objectContaining({
+      timeWindow: { kind: "relative", sinceSeconds: 300 },
+      include: expect.objectContaining({
+        logs: expect.objectContaining({ enabled: false }),
+        metrics: { enabled: true },
+      }),
+    }));
     await app.close();
   });
 

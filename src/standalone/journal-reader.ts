@@ -258,6 +258,6 @@ export async function streamJournalLines(
   const args = ["-u", unit, "--no-pager", "-o", "short-iso"];
   appendMaxLinesArg(args, maxLines);
   appendTimeArgs(args, { sinceSeconds, sinceTime, untilTime });
-  const result = await streamJournalctl(args, onLine);
+  const result = await streamJournalctl(args, onLine, { stripNoEntries: true });
   return result.lineCount;
 }

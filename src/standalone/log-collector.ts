@@ -188,10 +188,6 @@ function compareCandidateRank(a: LogCandidate, b: LogCandidate): number {
   if (a.sortMs != null && b.sortMs != null) {
     const byTime = a.sortMs - b.sortMs;
     if (byTime !== 0) return byTime;
-  } else if (a.sortMs != null) {
-    return 1;
-  } else if (b.sortMs != null) {
-    return -1;
   }
   return a.sequence - b.sequence;
 }

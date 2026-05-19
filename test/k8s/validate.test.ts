@@ -249,12 +249,13 @@ describe("normalizeBundleRequest", () => {
       expect(r.include.logs.timestamps).toBe(false);
     });
 
-    it("handles timeWindow that is not an object as absent", () => {
-      const r = normalizeBundleRequest(
-        minimalSelector({ timeWindow: "not-an-object" }),
-        config,
-      );
-      expect(r.timeWindow).toEqual({ kind: "relative", sinceSeconds: 600 });
+    it("rejects timeWindow that is not an object", () => {
+      expect(() =>
+        normalizeBundleRequest(
+          minimalSelector({ timeWindow: "not-an-object" }),
+          config,
+        ),
+      ).toThrow("Invalid object: timeWindow");
     });
   });
 
@@ -549,6 +550,15 @@ describe("normalizeBundleRequest", () => {
       ).toThrow("Invalid integer: include.logs.tailLines");
     });
 
+    it.each(["10junk", "1.9", 1.9])("rejects non-strict integer tailLines: %p", (tailLines) => {
+      expect(() =>
+        normalizeBundleRequest(
+          minimalSelector({ include: { logs: { tailLines } } }),
+          config,
+        ),
+      ).toThrow("Invalid integer: include.logs.tailLines");
+    });
+
     it("rejects boolean tailLines", () => {
       expect(() =>
         normalizeBundleRequest(
@@ -822,12 +832,22 @@ describe("normalizeBundleRequest", () => {
       expect(r.limits.maxPods).toBe(20);
     });
 
-    it("truncates float numbers via asInt (Math.trunc)", () => {
-      const r = normalizeBundleRequest(
-        minimalSelector({ limits: { maxPods: 5.9 } }),
-        config,
-      );
-      expect(r.limits.maxPods).toBe(5);
+    it("rejects float numbers via asInt", () => {
+      expect(() =>
+        normalizeBundleRequest(
+          minimalSelector({ limits: { maxPods: 5.9 } }),
+          config,
+        ),
+      ).toThrow("Invalid integer: limits.maxPods");
+    });
+
+    it.each(["10junk", "1.9"])("rejects non-strict integer limit strings: %p", (maxPods) => {
+      expect(() =>
+        normalizeBundleRequest(
+          minimalSelector({ limits: { maxPods } }),
+          config,
+        ),
+      ).toThrow("Invalid integer: limits.maxPods");
     });
 
     it("rejects Infinity as asInt input", () => {

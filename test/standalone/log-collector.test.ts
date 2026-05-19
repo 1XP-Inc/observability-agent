@@ -172,6 +172,44 @@ describe("collectStandaloneLogs", () => {
     fs.unlinkSync(logFile);
   });
 
+  it("keeps untimestamped lines intact when filtering spaced log messages", async () => {
+    const logFile = tmpLog("ERROR disk full\nINFO ok\n");
+    const services: ServiceDef[] = [{ name: "svc1", logs: [logFile] }];
+    const { writer, records } = makeWriter();
+
+    await collectStandaloneLogs({
+      writer,
+      services,
+      req: makeReq({
+        include: { logs: { enabled: true, includePatterns: ["ERROR"], excludePatterns: [] }, metrics: { enabled: false } },
+      }),
+    });
+
+    expect(logLineRecords(records)).toEqual([
+      expect.objectContaining({ ts: undefined, line: "ERROR disk full" }),
+    ]);
+
+    fs.unlinkSync(logFile);
+  });
+
+  it("applies excludePatterns to full untimestamped spaced log messages", async () => {
+    const logFile = tmpLog("ERROR disk full\nINFO ok\n");
+    const services: ServiceDef[] = [{ name: "svc1", logs: [logFile] }];
+    const { writer, records } = makeWriter();
+
+    await collectStandaloneLogs({
+      writer,
+      services,
+      req: makeReq({
+        include: { logs: { enabled: true, includePatterns: [], excludePatterns: ["disk full"] }, metrics: { enabled: false } },
+      }),
+    });
+
+    expect(logLineRecords(records).map((r: any) => r.line)).toEqual(["INFO ok"]);
+
+    fs.unlinkSync(logFile);
+  });
+
   it("tails file logs by line count without applying absolute time windows", async () => {
     const logFile = tmpLog(
       "2024-01-01T12:00:00Z inside-window\n" +
@@ -305,6 +343,28 @@ describe("collectStandaloneLogs", () => {
       lineLimited: true,
       matchedLogRecords: 3,
       returnedLogRecords: 2,
+    });
+
+    fs.unlinkSync(logFile);
+  });
+
+  it("falls back to input order when final limit compares timestamped and untimestamped lines", async () => {
+    const logFile = tmpLog("2024-01-01T00:00:00Z old timestamped\nuntimestamped newest\n");
+    const services: ServiceDef[] = [{ name: "svc1", logs: [logFile] }];
+    const { writer, records } = makeWriter();
+
+    await collectStandaloneLogs({
+      writer,
+      services,
+      req: makeReq({ limits: { maxTotalLogLines: 1, sinceSecondsMax: 3600, metricsTimeoutMs: 2000 } }),
+    });
+
+    expect(logLineRecords(records).map((r: any) => r.line)).toEqual(["untimestamped newest"]);
+    expect(logSummary(records)).toMatchObject({
+      type: "log_summary",
+      lineLimited: true,
+      matchedLogRecords: 2,
+      returnedLogRecords: 1,
     });
 
     fs.unlinkSync(logFile);

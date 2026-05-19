@@ -6,7 +6,7 @@ import type { BundleManager } from "../bundle-manager";
 import { HttpError } from "../http-error";
 import { loadSkillMarkdown } from "../skill";
 import type { ServiceDef, StandaloneNormalizedRequest } from "./types";
-import { normalizeStandaloneBundleRequest } from "./validate";
+import { assertStandaloneLogSourceConstraints, normalizeStandaloneBundleRequest } from "./validate";
 import {
   assertCapabilities,
   assertServicesAllowed,
@@ -84,6 +84,7 @@ export function registerStandaloneRoutes(
     try {
       const normalized = normalizeStandaloneBundleRequest(req.body, config, services);
       authorizeBundle(principalFromRequest(req), normalized, services);
+      assertStandaloneLogSourceConstraints(normalized, services);
       const job = await bundles.create(normalized);
       reply.send({ bundleId: job.bundleId, status: job.status });
     } catch (err: any) {

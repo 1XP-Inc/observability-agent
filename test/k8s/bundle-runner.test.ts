@@ -358,7 +358,7 @@ describe("runBundle", () => {
 
       const logRecords = records.filter((r) => r.type === "log");
       expect(logRecords.some((r) => r.line === "current")).toBe(true);
-      expect(logRecords.some((r) => r.line === "previous")).toBe(true);
+      expect(logRecords.some((r) => r.line === "previous" && r.previous === true)).toBe(true);
     });
 
     it("previous logs: K8s returns 400 writes skipped record", async () => {

@@ -172,6 +172,7 @@ export async function collectLogs(params: {
               pod: p.name,
               container: c,
               ts: parsed.ts,
+              previous: true,
               line: parsed.msg,
             });
           }

@@ -65,11 +65,11 @@ Authorization claims:
 
 `GET /v1/pods?ns=<namespace>&q=<substring>`
 
-- `ns`: namespace (`*` = all, admin only)
+- `ns`: namespace (`*` = all namespaces; requires admin or `allowedNamespaces: ["*"]`)
 - `selector`: label selector
 - `q`: pod name substring search
 
-Response: namespace, name, labels, containers[], status. Admin responses also include podIP, annotations, and nodeName.
+Response: namespace, name, labels, containers[], ready, phase. Admin responses also include podIP, annotations, and nodeName.
 
 ### Standalone Mode: Service List
 
@@ -172,14 +172,14 @@ Rules:
 ```
 
 Standalone rules:
-- `target.services` is a required array of service names registered in `OA_SERVICES`
-- `kind` is `"services"` (auto-inferred when a services array is present)
-- `events` not supported in standalone
-- `previous`, `timestamps` options not available in standalone
+- Use `target.kind: "services"` with a required `target.services` array of names registered in `OA_SERVICES`, or `target.kind: "all"` for every registered service
+- `kind` is `"services"` when a services array is present and no explicit kind is supplied
+- `events` is ignored in standalone requests
+- `previous` and `timestamps` are ignored in standalone requests
 - File logs are collected via `tail -n <include.logs.tailLines>` from paths configured per service
 - Journal logs are collected via `journalctl`; they use `timeWindow` when supplied, otherwise `include.logs.tailLines`
-- `timeWindow` is accepted only when selected standalone services include a configured journal source; file logs are never time-filtered
-- OA applies include/exclude filters before the final `maxTotalLogLines`, then globally merges matching records by parsed timestamp
+- When logs are enabled, `timeWindow` is accepted only when selected standalone services include a configured journal source; file logs are never time-filtered
+- OA applies include/exclude filters before the final `maxTotalLogLines`, then globally merges matching records by parsed timestamp when both compared records have timestamps; otherwise it keeps source read order
 - Clients cannot request arbitrary file paths or journal units; only registered `OA_SERVICES` entries are available
 - OA uses the current process OS permissions and does not elevate privileges
 
@@ -188,8 +188,8 @@ Standalone log API constraints:
 | Field | Applies to | Behavior |
 |-------|------------|----------|
 | `include.logs.tailLines` | File logs, journal logs without `timeWindow` | Passed to `tail -n` for files and `journalctl -n` for journals |
-| `timeWindow.sinceSeconds` | Journal logs only | Relative journal window |
-| `timeWindow.start` / `timeWindow.end` | Journal logs only | Absolute journal window; both fields required together |
+| `timeWindow.sinceSeconds` | Journal logs only | Relative journal window; rejected when logs are enabled and selected services have no journal source |
+| `timeWindow.start` / `timeWindow.end` | Journal logs only | Absolute journal window; both fields required together; rejected when logs are enabled and selected services have no journal source |
 | `limits.maxTotalLogLines` | All standalone logs | Final result budget after filtering and global merge |
 
 K8s selector bundle note:
@@ -294,14 +294,14 @@ OA writes a skip record in this case:
 | User Input | Action |
 |------------|--------|
 | "Analyze backend logs" | `GET /v1/pods?q=backend` → bundle all matching pods |
-| "Only my-app pod 0" | `target.pods: [{pod: "my-app-pod-0"}]` |
+| "Only my-app pod 0" | `target.pods: [{namespace: "default", pod: "my-app-pod-0"}]` |
 | "All cluster error logs" | `namespace: "*"`, logs only, cluster ERROR/WARN |
 
 ### Standalone Mode
 | User Input | Action |
 |------------|--------|
 | "Analyze solana validator logs" | `GET /v1/services` → `target.services: ["solana-validator"]` |
-| "Check all service status" | `GET /v1/services` → bundle all service names |
+| "Check all service status" | `target.kind: "all"` |
 | "Only rpc-node metrics" | `target.services: ["rpc-node"]`, logs disabled, metrics only |
 
 ---
@@ -375,7 +375,7 @@ Standalone permission model:
 Standalone time windows:
 - File log requests read the latest configured line budget with `tail`; `sinceSeconds` and absolute windows do not seek or filter file contents.
 - Journal requests use either `timeWindow` (`--since`/`--until`) or the configured line budget, not both.
-- `timeWindow` on a standalone request is rejected when the selected services have no configured journal source.
+- `timeWindow` on a standalone request is rejected when logs are enabled and the selected services have no configured journal source.
 
 ---
 

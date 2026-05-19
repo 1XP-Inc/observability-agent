@@ -8,10 +8,13 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 
 function asInt(name: string, v: unknown): number | undefined {
   if (v == null) return undefined;
-  if (typeof v === "number" && Number.isFinite(v)) return Math.trunc(v);
-  if (typeof v === "string" && v.trim().length) {
-    const n = Number.parseInt(v, 10);
-    if (Number.isFinite(n) && !Number.isNaN(n)) return n;
+  if (typeof v === "number" && Number.isSafeInteger(v)) return v;
+  if (typeof v === "string") {
+    const s = v.trim();
+    if (/^[+-]?\d+$/.test(s)) {
+      const n = Number(s);
+      if (Number.isSafeInteger(n)) return n;
+    }
   }
   throw new HttpError(400, `Invalid integer: ${name}`);
 }
@@ -83,6 +86,20 @@ export type StandaloneBundleRequest = {
   };
 };
 
+function selectedServicesForRequest(req: StandaloneNormalizedRequest, services: ServiceDef[]): ServiceDef[] {
+  if (req.target.kind === "all") return services;
+  const selected = new Set(req.target.services);
+  return services.filter((svc) => selected.has(svc.name));
+}
+
+export function assertStandaloneLogSourceConstraints(req: StandaloneNormalizedRequest, services: ServiceDef[]): void {
+  if (!req.include.logs.enabled || !req.timeWindow) return;
+  const hasJournalSource = selectedServicesForRequest(req, services).some((svc) => Boolean(svc.journal));
+  if (!hasJournalSource) {
+    throw new HttpError(400, "timeWindow is only supported for selected journal log sources");
+  }
+}
+
 export function normalizeStandaloneBundleRequest(
   input: unknown,
   config: OAConfig,
@@ -121,8 +138,12 @@ export function normalizeStandaloneBundleRequest(
   const knownByName = new Map(knownServices.map((s) => [s.name, s]));
 
   let target: StandaloneNormalizedRequest["target"];
-  const selectedServices: ServiceDef[] = [];
-  if (targetObj.kind === "services" || serviceNames) {
+  if (targetObj.kind === "all") {
+    if (serviceNames && serviceNames.length > 0) {
+      throw new HttpError(400, "target.services cannot be used with target.kind 'all'");
+    }
+    target = { kind: "all" };
+  } else if (targetObj.kind === "services" || serviceNames) {
     if (!serviceNames || serviceNames.length === 0) {
       throw new HttpError(400, "target.services must be a non-empty array");
     }
@@ -131,11 +152,10 @@ export function normalizeStandaloneBundleRequest(
       if (!service) {
         throw new HttpError(400, `Unknown service: ${svc}`);
       }
-      selectedServices.push(service);
     }
     target = { kind: "services", services: serviceNames };
   } else {
-    throw new HttpError(400, "target.kind must be 'services' with a services[] array");
+    throw new HttpError(400, "target.kind must be 'services' with a services[] array or 'all'");
   }
 
   // --- include ---
@@ -174,10 +194,6 @@ export function normalizeStandaloneBundleRequest(
     throw new HttpError(400, "Invalid object: timeWindow");
   }
   const timeWindowObj = isRecord(body.timeWindow) ? body.timeWindow : undefined;
-  const hasJournalSource = selectedServices.some((svc) => Boolean(svc.journal));
-  if (timeWindowObj && !hasJournalSource) {
-    throw new HttpError(400, "timeWindow is only supported for selected journal log sources");
-  }
 
   const hasSinceSeconds = timeWindowObj?.sinceSeconds != null;
   const hasAbs = timeWindowObj?.start != null || timeWindowObj?.end != null;

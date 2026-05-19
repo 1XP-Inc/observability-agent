@@ -1,4 +1,4 @@
-import { normalizeStandaloneBundleRequest } from "../../src/standalone/validate";
+import { assertStandaloneLogSourceConstraints, normalizeStandaloneBundleRequest } from "../../src/standalone/validate";
 import { createMockConfig } from "../helpers";
 import type { ServiceDef } from "../../src/standalone/types";
 
@@ -61,6 +61,23 @@ describe("normalizeStandaloneBundleRequest", () => {
       services,
     );
     expect(result.target).toEqual({ kind: "services", services: ["solana-validator"] });
+  });
+
+  it("normalizes target kind all", () => {
+    const result = normalizeStandaloneBundleRequest(
+      { target: { kind: "all" } },
+      cfg(),
+      services,
+    );
+    expect(result.target).toEqual({ kind: "all" });
+  });
+
+  it("throws 400 when target.services is combined with kind all", () => {
+    expect(() => normalizeStandaloneBundleRequest(
+      { target: { kind: "all", services: ["solana-validator"] } },
+      cfg(),
+      services,
+    )).toThrow("target.services cannot be used with target.kind 'all'");
   });
 
   it("infers kind='services' when services array is present", () => {
@@ -147,19 +164,20 @@ describe("normalizeStandaloneBundleRequest", () => {
     )).toThrow("sinceSecondsMax");
   });
 
-  it("throws 400 when timeWindow is requested for file-only services", () => {
-    expect(() => normalizeStandaloneBundleRequest(
+  it("normalizes file-only timeWindow before post-auth source constraints", () => {
+    const result = normalizeStandaloneBundleRequest(
       {
         target: { kind: "services", services: ["rpc-node"] },
         timeWindow: { sinceSeconds: 300 },
       },
       cfg(),
       services,
-    )).toThrow("timeWindow is only supported for selected journal log sources");
+    );
+    expect(result.timeWindow).toEqual({ kind: "relative", sinceSeconds: 300 });
   });
 
-  it("throws 400 when disabled file-only logs still include timeWindow", () => {
-    expect(() => normalizeStandaloneBundleRequest(
+  it("allows disabled file-only logs with timeWindow at validation time", () => {
+    const result = normalizeStandaloneBundleRequest(
       {
         target: { kind: "services", services: ["rpc-node"] },
         timeWindow: { sinceSeconds: 300 },
@@ -167,7 +185,34 @@ describe("normalizeStandaloneBundleRequest", () => {
       },
       cfg(),
       services,
-    )).toThrow("timeWindow is only supported for selected journal log sources");
+    );
+    expect(result.include.logs.enabled).toBe(false);
+    expect(result.timeWindow).toEqual({ kind: "relative", sinceSeconds: 300 });
+  });
+
+  it("post-auth source constraints reject file-only timeWindow when logs are enabled", () => {
+    const result = normalizeStandaloneBundleRequest(
+      {
+        target: { kind: "services", services: ["rpc-node"] },
+        timeWindow: { sinceSeconds: 300 },
+      },
+      cfg(),
+      services,
+    );
+    expect(() => assertStandaloneLogSourceConstraints(result, services)).toThrow("timeWindow is only supported for selected journal log sources");
+  });
+
+  it("post-auth source constraints allow metrics-only file services with timeWindow", () => {
+    const result = normalizeStandaloneBundleRequest(
+      {
+        target: { kind: "services", services: ["rpc-node"] },
+        timeWindow: { sinceSeconds: 300 },
+        include: { logs: { enabled: false }, metrics: { enabled: true } },
+      },
+      cfg(),
+      services,
+    );
+    expect(() => assertStandaloneLogSourceConstraints(result, services)).not.toThrow();
   });
 
   // --- include ---
@@ -227,6 +272,17 @@ describe("normalizeStandaloneBundleRequest", () => {
       {
         target: { kind: "services", services: ["solana-validator"] },
         include: { logs: { tailLines: "abc" } },
+      },
+      cfg(),
+      services,
+    )).toThrow("Invalid integer: include.logs.tailLines");
+  });
+
+  it.each(["10junk", "1.9", 1.9])("rejects non-strict integer tailLines: %p", (tailLines) => {
+    expect(() => normalizeStandaloneBundleRequest(
+      {
+        target: { kind: "services", services: ["solana-validator"] },
+        include: { logs: { tailLines } },
       },
       cfg(),
       services,
@@ -345,6 +401,17 @@ describe("normalizeStandaloneBundleRequest", () => {
       cfg(),
       services,
     )).toThrow("Invalid integer");
+  });
+
+  it.each(["10junk", "1.9", 1.9])("rejects non-strict integer limits: %p", (maxTotalLogLines) => {
+    expect(() => normalizeStandaloneBundleRequest(
+      {
+        target: { kind: "services", services: ["solana-validator"] },
+        limits: { maxTotalLogLines },
+      },
+      cfg(),
+      services,
+    )).toThrow("Invalid integer: limits.maxTotalLogLines");
   });
 
   // --- boolean validation ---
