@@ -73,7 +73,7 @@ export type StandaloneBundleRequest = {
     services?: string[];
   };
   include?: {
-    logs?: { enabled?: boolean; excludePatterns?: string[] };
+    logs?: { enabled?: boolean; includePatterns?: string[]; excludePatterns?: string[] };
     metrics?: { enabled?: boolean };
   };
   limits?: {
@@ -161,6 +161,14 @@ export function normalizeStandaloneBundleRequest(
   const includeLogs = asBool("include.logs.enabled", logsObj?.enabled) ?? config.defaults.include.logs;
   const includeMetrics = asBool("include.metrics.enabled", metricsObj?.enabled) ?? config.defaults.include.metrics;
 
+  const includePatterns = asStringArray("include.logs.includePatterns", logsObj?.includePatterns) ?? [];
+  if (includePatterns.length > 50) {
+    throw new HttpError(400, "include.logs.includePatterns too large (max 50)");
+  }
+  for (const p of includePatterns) {
+    if (p.length > 200) throw new HttpError(400, "include.logs.includePatterns item too long (max 200)");
+  }
+
   const excludePatterns = asStringArray("include.logs.excludePatterns", logsObj?.excludePatterns) ?? [];
   if (excludePatterns.length > 50) {
     throw new HttpError(400, "include.logs.excludePatterns too large (max 50)");
@@ -187,7 +195,7 @@ export function normalizeStandaloneBundleRequest(
     timeWindow,
     target,
     include: {
-      logs: { enabled: includeLogs, excludePatterns },
+      logs: { enabled: includeLogs, includePatterns, excludePatterns },
       metrics: { enabled: includeMetrics },
     },
     limits: {

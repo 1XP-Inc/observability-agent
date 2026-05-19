@@ -162,7 +162,7 @@ Rules:
     "services": ["solana-validator", "rpc-node"]
   },
   "include": {
-    "logs": { "enabled": true, "excludePatterns": ["healthcheck"] },
+    "logs": { "enabled": true, "includePatterns": ["ERROR"], "excludePatterns": ["healthcheck"] },
     "metrics": { "enabled": true }
   },
   "limits": {
@@ -176,8 +176,9 @@ Standalone rules:
 - `target.services` is a required array of service names registered in `OA_SERVICES`
 - `kind` is `"services"` (auto-inferred when a services array is present)
 - `events` not supported in standalone
-- `previous`, `timestamps` options not available (file tail always reads latest N lines)
+- `previous`, `timestamps` options not available in standalone
 - Logs are collected via `tail` from file paths configured per service and `journalctl -u` for configured systemd units
+- OA reads bounded candidates from every requested log source, applies time-window and include/exclude filters, globally merges matches by parsed timestamp, then applies `maxTotalLogLines`
 - Clients cannot request arbitrary file paths or journal units; only registered `OA_SERVICES` entries are available
 - OA uses the current process OS permissions and does not elevate privileges
 
@@ -185,9 +186,10 @@ K8s selector bundle note:
 - Selector targets list matching pods internally before collecting logs/events/metrics.
 - Scoped tokens therefore need both `pods` capability and the requested data-source capabilities for selector bundles.
 
-### Log Line Exclude Filter (excludePatterns)
+### Log Line Filters (includePatterns / excludePatterns)
+`include.logs.includePatterns: string[]` keeps only lines containing at least one substring (like `grep`).
 `include.logs.excludePatterns: string[]` removes lines by substring match (like `grep -v`).
-Applied as a **post-filter** step alongside timeWindow filtering. Works the same in both K8s and standalone.
+Standalone applies include/exclude filters before the final `maxTotalLogLines` budget. `excludePatterns` also works in K8s mode.
 
 Example:
 ```json
@@ -195,6 +197,7 @@ Example:
   "include": {
     "logs": {
       "enabled": true,
+      "includePatterns": ["ERROR", "panic"],
       "excludePatterns": ["GET /healthz", "healthcheck"]
     }
   }
@@ -226,6 +229,7 @@ Example:
 | `log` | File log | service, file, ts, line, skipped?, reason? |
 | `log` | Journal log | service, journal, journalScope?, journalUser?, ts, line, skipped?, reason? |
 | `log_error` | User journal error | service, journal, journalScope, journalUser, ts, reason, error |
+| `log_summary` | Log budget/source summary | ts, lineLimited, matchedLogRecords, returnedLogRecords, sources[] |
 | `metrics_text` | Service metrics | service, url, ts, ok/skipped/error, content |
 
 Standalone log skip reasons:

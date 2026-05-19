@@ -14,15 +14,23 @@ import { readJournalLines } from "../../src/standalone/journal-reader";
 const mockReadJournalLines = vi.mocked(readJournalLines);
 
 function makeReq(overrides?: Partial<StandaloneNormalizedRequest>): StandaloneNormalizedRequest {
-  return {
-    timeWindow: { kind: "relative", sinceSeconds: 600 },
+  const base: StandaloneNormalizedRequest = {
+    timeWindow: { kind: "absolute", start: "2020-01-01T00:00:00Z", end: "2030-01-01T00:00:00Z" },
     target: { kind: "services", services: ["svc1"] },
     include: {
-      logs: { enabled: true, excludePatterns: [] },
+      logs: { enabled: true, includePatterns: [], excludePatterns: [] },
       metrics: { enabled: false },
     },
     limits: { maxTotalLogLines: 50_000, sinceSecondsMax: 3600, metricsTimeoutMs: 2000 },
+  };
+  return {
+    ...base,
     ...overrides,
+    include: {
+      logs: { ...base.include.logs, ...overrides?.include?.logs },
+      metrics: { ...base.include.metrics, ...overrides?.include?.metrics },
+    },
+    limits: { ...base.limits, ...overrides?.limits },
   };
 }
 
@@ -35,6 +43,14 @@ function makeWriter() {
     },
     records,
   };
+}
+
+function logLineRecords(records: any[]) {
+  return records.filter((r: any) => r.type === "log" && r.line);
+}
+
+function logSummary(records: any[]) {
+  return records.find((r: any) => r.type === "log_summary");
 }
 
 function tmpLog(content: string): string {
@@ -56,7 +72,7 @@ describe("collectStandaloneLogs", () => {
 
     await collectStandaloneLogs({ writer, services, req: makeReq() });
 
-    const logRecords = records.filter((r: any) => r.type === "log" && r.line);
+    const logRecords = logLineRecords(records);
     expect(logRecords.length).toBe(2);
     expect(logRecords[0]).toMatchObject({ type: "log", service: "svc1", file: logFile, ts: "2024-01-01T00:00:00Z", line: "hello" });
     expect(logRecords[1]).toMatchObject({ line: "world" });
@@ -88,12 +104,17 @@ describe("collectStandaloneLogs", () => {
 
     await collectStandaloneLogs({ writer, services, req: makeReq() });
 
-    expect(records.length).toBe(1);
     expect(records[0]).toMatchObject({
       type: "log",
       service: "svc1",
       skipped: true,
       reason: "file_not_found",
+    });
+    expect(logSummary(records)).toMatchObject({
+      type: "log_summary",
+      matchedLogRecords: 0,
+      returnedLogRecords: 0,
+      sources: [expect.objectContaining({ service: "svc1", skipped: true, reason: "file_not_found" })],
     });
   });
 
@@ -108,9 +129,32 @@ describe("collectStandaloneLogs", () => {
       req: makeReq({ include: { logs: { enabled: true, excludePatterns: ["healthcheck"] }, metrics: { enabled: false } } }),
     });
 
-    const logRecords = records.filter((r: any) => r.type === "log" && r.line);
+    const logRecords = logLineRecords(records);
     expect(logRecords.length).toBe(1);
     expect(logRecords[0].line).toBe("important msg");
+
+    fs.unlinkSync(logFile);
+  });
+
+  it("applies includePatterns before the final line limit", async () => {
+    const logFile = tmpLog(
+      "2024-01-01T00:00:00Z info first\n" +
+      "2024-01-01T00:00:01Z error matched\n" +
+      "2024-01-01T00:00:02Z info second\n"
+    );
+    const services: ServiceDef[] = [{ name: "svc1", logs: [logFile] }];
+    const { writer, records } = makeWriter();
+
+    await collectStandaloneLogs({
+      writer,
+      services,
+      req: makeReq({
+        include: { logs: { enabled: true, includePatterns: ["error"] }, metrics: { enabled: false } },
+        limits: { maxTotalLogLines: 1, sinceSecondsMax: 3600, metricsTimeoutMs: 2000 },
+      }),
+    });
+
+    expect(logLineRecords(records).map((r: any) => r.line)).toEqual(["error matched"]);
 
     fs.unlinkSync(logFile);
   });
@@ -127,8 +171,33 @@ describe("collectStandaloneLogs", () => {
       req: makeReq({ limits: { maxTotalLogLines: 5, sinceSecondsMax: 3600, metricsTimeoutMs: 2000 } }),
     });
 
-    const logRecords = records.filter((r: any) => r.type === "log" && r.line);
+    const logRecords = logLineRecords(records);
     expect(logRecords.length).toBe(5);
+    expect(logRecords.map((r: any) => r.line)).toEqual(["line-5", "line-6", "line-7", "line-8", "line-9"]);
+    expect(logSummary(records)).toMatchObject({
+      type: "log_summary",
+      lineLimited: true,
+      matchedLogRecords: 10,
+      returnedLogRecords: 5,
+    });
+
+    fs.unlinkSync(logFile);
+  });
+
+  it("filters file logs by relative sinceSeconds", async () => {
+    const oldTs = new Date(Date.now() - 1_200_000).toISOString();
+    const recentTs = new Date(Date.now() - 60_000).toISOString();
+    const logFile = tmpLog(`${oldTs} old\n${recentTs} recent\n`);
+    const services: ServiceDef[] = [{ name: "svc1", logs: [logFile] }];
+    const { writer, records } = makeWriter();
+
+    await collectStandaloneLogs({
+      writer,
+      services,
+      req: makeReq({ timeWindow: { kind: "relative", sinceSeconds: 600 } }),
+    });
+
+    expect(logLineRecords(records).map((r: any) => r.line)).toEqual(["recent"]);
 
     fs.unlinkSync(logFile);
   });
@@ -150,7 +219,7 @@ describe("collectStandaloneLogs", () => {
       }),
     });
 
-    const logRecords = records.filter((r: any) => r.type === "log" && r.line);
+    const logRecords = logLineRecords(records);
     expect(logRecords.length).toBe(1);
     expect(logRecords[0].line).toBe("inside");
 
@@ -170,7 +239,7 @@ describe("collectStandaloneLogs", () => {
       }),
     });
 
-    const logRecords = records.filter((r: any) => r.type === "log" && r.line);
+    const logRecords = logLineRecords(records);
     expect(logRecords.length).toBe(1);
 
     fs.unlinkSync(logFile);
@@ -187,7 +256,7 @@ describe("collectStandaloneLogs", () => {
 
     await collectStandaloneLogs({ writer, services, req: makeReq() });
 
-    const logRecords = records.filter((r: any) => r.type === "log" && r.line);
+    const logRecords = logLineRecords(records);
     expect(logRecords.length).toBe(2);
     expect(logRecords[0].service).toBe("svc1");
     expect(logRecords[1].service).toBe("svc2");
@@ -203,12 +272,15 @@ describe("collectStandaloneLogs", () => {
 
     await collectStandaloneLogs({ writer, services, req: makeReq() });
 
-    expect(records.length).toBe(1);
     expect(records[0]).toMatchObject({
       type: "log",
       service: "svc1",
       skipped: true,
       reason: "read_error",
+    });
+    expect(logSummary(records)).toMatchObject({
+      type: "log_summary",
+      sources: [expect.objectContaining({ service: "svc1", skipped: true, reason: "read_error" })],
     });
   });
 
@@ -219,7 +291,7 @@ describe("collectStandaloneLogs", () => {
 
     await collectStandaloneLogs({ writer, services, req: makeReq() });
 
-    const logRecords = records.filter((r: any) => r.type === "log" && r.line);
+    const logRecords = logLineRecords(records);
     expect(logRecords.length).toBe(2);
 
     fs.unlinkSync(logFile);
@@ -237,7 +309,7 @@ describe("collectStandaloneLogs", () => {
 
     await collectStandaloneLogs({ writer, services, req: makeReq() });
 
-    const logRecords = records.filter((r: any) => r.type === "log" && r.line);
+    const logRecords = logLineRecords(records);
     expect(logRecords.length).toBe(2);
     expect(logRecords[0]).toMatchObject({
       type: "log",
@@ -321,7 +393,7 @@ describe("collectStandaloneLogs", () => {
 
     await collectStandaloneLogs({ writer, services, req: makeReq() });
 
-    const logRecords = records.filter((r: any) => r.type === "log" && r.line);
+    const logRecords = logLineRecords(records);
     expect(logRecords.length).toBe(2);
     expect(logRecords[0]).toMatchObject({ file: logFile, line: "file-line" });
     expect(logRecords[1]).toMatchObject({ journal: "app.service", line: "host unit[1]: journal-line" });
@@ -345,11 +417,64 @@ describe("collectStandaloneLogs", () => {
       req: makeReq({ limits: { maxTotalLogLines: 5, sinceSecondsMax: 3600, metricsTimeoutMs: 2000 } }),
     });
 
-    const logRecords = records.filter((r: any) => r.type === "log" && r.line);
-    // 4 file + 1 journal = 5 (capped at maxTotalLogLines)
+    const logRecords = logLineRecords(records);
     expect(logRecords.length).toBe(5);
+    expect(logRecords.map((r: any) => r.line)).toEqual([
+      "file-1",
+      "file-2",
+      "file-3",
+      "host unit[1]: journal-0",
+      "host unit[1]: journal-1",
+    ]);
+    expect(logSummary(records)).toMatchObject({
+      type: "log_summary",
+      lineLimited: true,
+      matchedLogRecords: 6,
+      returnedLogRecords: 5,
+    });
 
     fs.unlinkSync(logFile);
+  });
+
+  it("globally merges candidates before applying maxTotalLogLines", async () => {
+    const f1 = tmpLog(
+      "2024-01-01T00:00:00Z svc1-0\n" +
+      "2024-01-01T00:00:01Z svc1-1\n" +
+      "2024-01-01T00:00:02Z svc1-2\n" +
+      "2024-01-01T00:00:03Z svc1-3\n" +
+      "2024-01-01T00:00:04Z svc1-4\n"
+    );
+    const f2 = tmpLog("2024-01-01T00:00:10Z svc2-0\n2024-01-01T00:00:11Z svc2-1\n");
+    const services: ServiceDef[] = [
+      { name: "svc1", logs: [f1] },
+      { name: "svc2", logs: [f2] },
+    ];
+    const { writer, records } = makeWriter();
+
+    await collectStandaloneLogs({
+      writer,
+      services,
+      req: makeReq({ limits: { maxTotalLogLines: 3, sinceSecondsMax: 3600, metricsTimeoutMs: 2000 } }),
+    });
+
+    expect(logLineRecords(records).map((r: any) => `${r.service}:${r.line}`)).toEqual([
+      "svc1:svc1-4",
+      "svc2:svc2-0",
+      "svc2:svc2-1",
+    ]);
+    expect(logSummary(records)).toMatchObject({
+      type: "log_summary",
+      lineLimited: true,
+      matchedLogRecords: 7,
+      returnedLogRecords: 3,
+      sources: expect.arrayContaining([
+        expect.objectContaining({ service: "svc1", matchedLogRecords: 5, returnedLogRecords: 1 }),
+        expect.objectContaining({ service: "svc2", matchedLogRecords: 2, returnedLogRecords: 2 }),
+      ]),
+    });
+
+    fs.unlinkSync(f1);
+    fs.unlinkSync(f2);
   });
 
   it("writes skipped record when journalctl is not found", async () => {
@@ -361,13 +486,16 @@ describe("collectStandaloneLogs", () => {
 
     await collectStandaloneLogs({ writer, services, req: makeReq() });
 
-    expect(records.length).toBe(1);
     expect(records[0]).toMatchObject({
       type: "log",
       service: "svc1",
       journal: "nginx.service",
       skipped: true,
       reason: "journalctl_not_found",
+    });
+    expect(logSummary(records)).toMatchObject({
+      type: "log_summary",
+      sources: [expect.objectContaining({ service: "svc1", skipped: true, reason: "journalctl_not_found" })],
     });
   });
 
@@ -380,13 +508,16 @@ describe("collectStandaloneLogs", () => {
 
     await collectStandaloneLogs({ writer, services, req: makeReq() });
 
-    expect(records.length).toBe(1);
     expect(records[0]).toMatchObject({
       type: "log",
       service: "svc1",
       journal: "nginx.service",
       skipped: true,
       reason: "journal_read_error",
+    });
+    expect(logSummary(records)).toMatchObject({
+      type: "log_summary",
+      sources: [expect.objectContaining({ service: "svc1", skipped: true, reason: "journal_read_error" })],
     });
   });
 
@@ -399,13 +530,16 @@ describe("collectStandaloneLogs", () => {
 
     await collectStandaloneLogs({ writer, services, req: makeReq() });
 
-    expect(records.length).toBe(1);
     expect(records[0]).toMatchObject({
       type: "log",
       service: "svc1",
       journal: "nginx.service",
       skipped: true,
       reason: "journal_permission_denied",
+    });
+    expect(logSummary(records)).toMatchObject({
+      type: "log_summary",
+      sources: [expect.objectContaining({ service: "svc1", skipped: true, reason: "journal_permission_denied" })],
     });
   });
 
@@ -423,7 +557,6 @@ describe("collectStandaloneLogs", () => {
 
     await collectStandaloneLogs({ writer, services, req: makeReq() });
 
-    expect(records).toHaveLength(1);
     expect(records[0]).toMatchObject({
       type: "log_error",
       service: "beacond",
@@ -432,6 +565,10 @@ describe("collectStandaloneLogs", () => {
       journalUser: "ubuntu",
       reason: "journal_permission_denied",
       error: "permission denied reading user journal; add the OA process user to systemd-journal and restart OA",
+    });
+    expect(logSummary(records)).toMatchObject({
+      type: "log_summary",
+      sources: [expect.objectContaining({ service: "beacond", skipped: true, reason: "journal_permission_denied" })],
     });
   });
 
@@ -526,7 +663,7 @@ describe("collectStandaloneLogs", () => {
       }),
     });
 
-    const logRecords = records.filter((r: any) => r.type === "log" && r.line);
+    const logRecords = logLineRecords(records);
     expect(logRecords.length).toBe(1);
     expect(logRecords[0].line).toContain("inside");
   });
@@ -544,7 +681,7 @@ describe("collectStandaloneLogs", () => {
       }),
     });
 
-    const logRecords = records.filter((r: any) => r.type === "log" && r.line);
+    const logRecords = logLineRecords(records);
     expect(logRecords.length).toBe(1);
   });
 

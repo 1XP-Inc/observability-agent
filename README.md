@@ -18,7 +18,7 @@ flowchart LR
 
 - **Bundle-first workflow** — request a bundle, poll for completion, download a single `.ndjson.gz` artifact
 - **Dual mode** — auto-detects K8s or standalone via `KUBERNETES_SERVICE_HOST`
-- **Logs** — K8s container logs, local file tail, or journalctl (systemd), with timestamp parsing, time-window filtering, and exclude patterns
+- **Logs** — K8s container logs, local file tail, or journalctl (systemd), with timestamp parsing, time-window filtering, and include/exclude patterns
 - **Events** — K8s events scoped to target pods (K8s mode only)
 - **Metrics** — Prometheus scraping from pod annotations (K8s) or configured URLs (standalone)
 - **JWT authz** — HS256 shared-secret authentication with mandatory `exp` claim and JWT scope claims
@@ -134,7 +134,7 @@ curl -X POST https://oa.example.com/v1/bundles \
       "services": ["solana-validator"]
     },
     "include": {
-      "logs":    { "enabled": true },
+      "logs":    { "enabled": true, "includePatterns": ["ERROR"], "excludePatterns": ["healthcheck"] },
       "metrics": { "enabled": true }
     }
   }'
@@ -149,6 +149,7 @@ curl -X POST https://oa.example.com/v1/bundles \
 | `log` | Standalone | File log line (service, file, ts, line) |
 | `log` | Standalone | Journal log line (service, journal, ts, line, journalScope?, journalUser?) |
 | `log_error` | Standalone | User journal configuration or permission error (service, journal, journalScope, journalUser, ts, reason, error) |
+| `log_summary` | Standalone | Log budget/source summary (lineLimited, matchedLogRecords, returnedLogRecords, sources) |
 | `event` | K8s only | K8s event (reason, message, involvedObject) |
 | `metrics_text` | K8s | Pod metrics scrape (namespace, pod, port, path) |
 | `metrics_text` | Standalone | Service metrics scrape (service, url) |
@@ -214,7 +215,7 @@ All configuration is via environment variables with sensible defaults:
 
 Standalone collection is allowlisted by `OA_SERVICES`: API clients choose registered service names, not arbitrary file paths, journal units, or metrics URLs. OA does not elevate privileges. File logs and journal logs are readable only when the OA process already has the required OS permissions. For systemd, `journalctl` can show all system and user journals only when the current process account already has journal access (for example, root or an account in `systemd-journal`). Without system journal access, OA returns a skipped `log` record with `reason: "journal_permission_denied"` when journalctl reports a permission problem. Without user journal access, or when `journalUser` cannot be resolved, OA returns a `log_error` record with `journalScope` and `journalUser`.
 
-Relative standalone file log requests read the latest configured line budget with `tail`; `sinceSeconds` does not seek older file contents. Absolute standalone requests post-filter lines with parseable timestamps and keep lines without parseable timestamps.
+Standalone log collection reads bounded candidates from each configured file and journal source, applies time-window and include/exclude filtering, globally merges matches by parsed timestamp, then applies `maxTotalLogLines` as the final output budget. Relative file requests filter parseable timestamps by `sinceSeconds`; lines without parseable timestamps are retained for compatibility and sort behind timestamped lines.
 
 Metrics URLs are configured by the operator and are fetched as-is for compatibility. Treat them as trusted configuration: OA does not block localhost, private network, or metadata-address targets by default.
 

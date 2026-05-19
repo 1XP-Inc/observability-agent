@@ -178,6 +178,41 @@ describe("normalizeStandaloneBundleRequest", () => {
     expect(result.include.logs.enabled).toBe(false);
   });
 
+  it("normalizes includePatterns", () => {
+    const result = normalizeStandaloneBundleRequest(
+      {
+        target: { kind: "services", services: ["solana-validator"] },
+        include: { logs: { includePatterns: [" error ", ""] } },
+      },
+      cfg(),
+      services,
+    );
+    expect(result.include.logs.includePatterns).toEqual(["error"]);
+  });
+
+  it("throws 400 when includePatterns too large", () => {
+    const patterns = Array.from({ length: 51 }, (_, i) => `pat${i}`);
+    expect(() => normalizeStandaloneBundleRequest(
+      {
+        target: { kind: "services", services: ["solana-validator"] },
+        include: { logs: { includePatterns: patterns } },
+      },
+      cfg(),
+      services,
+    )).toThrow("includePatterns too large");
+  });
+
+  it("throws 400 when includePatterns item too long", () => {
+    expect(() => normalizeStandaloneBundleRequest(
+      {
+        target: { kind: "services", services: ["solana-validator"] },
+        include: { logs: { includePatterns: ["x".repeat(201)] } },
+      },
+      cfg(),
+      services,
+    )).toThrow("includePatterns item too long");
+  });
+
   it("throws 400 when excludePatterns too large", () => {
     const patterns = Array.from({ length: 51 }, (_, i) => `pat${i}`);
     expect(() => normalizeStandaloneBundleRequest(
@@ -365,7 +400,10 @@ describe("normalizeStandaloneBundleRequest", () => {
       {
         target: { kind: "services", services: ["solana-validator", "rpc-node"] },
         timeWindow: { sinceSeconds: 1800 },
-        include: { logs: { enabled: true, excludePatterns: ["healthcheck"] }, metrics: { enabled: false } },
+        include: {
+          logs: { enabled: true, includePatterns: ["error"], excludePatterns: ["healthcheck"] },
+          metrics: { enabled: false },
+        },
       },
       cfg(),
       services,
@@ -375,7 +413,7 @@ describe("normalizeStandaloneBundleRequest", () => {
       timeWindow: { kind: "relative", sinceSeconds: 1800 },
       target: { kind: "services", services: ["solana-validator", "rpc-node"] },
       include: {
-        logs: { enabled: true, excludePatterns: ["healthcheck"] },
+        logs: { enabled: true, includePatterns: ["error"], excludePatterns: ["healthcheck"] },
         metrics: { enabled: false },
       },
       limits: {
