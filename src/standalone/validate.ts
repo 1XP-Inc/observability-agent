@@ -175,7 +175,7 @@ export function normalizeStandaloneBundleRequest(
   }
   const timeWindowObj = isRecord(body.timeWindow) ? body.timeWindow : undefined;
   const hasJournalSource = selectedServices.some((svc) => Boolean(svc.journal));
-  if (includeLogs && timeWindowObj && !hasJournalSource) {
+  if (timeWindowObj && !hasJournalSource) {
     throw new HttpError(400, "timeWindow is only supported for selected journal log sources");
   }
 

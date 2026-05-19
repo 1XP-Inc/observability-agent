@@ -158,6 +158,18 @@ describe("normalizeStandaloneBundleRequest", () => {
     )).toThrow("timeWindow is only supported for selected journal log sources");
   });
 
+  it("throws 400 when disabled file-only logs still include timeWindow", () => {
+    expect(() => normalizeStandaloneBundleRequest(
+      {
+        target: { kind: "services", services: ["rpc-node"] },
+        timeWindow: { sinceSeconds: 300 },
+        include: { logs: { enabled: false } },
+      },
+      cfg(),
+      services,
+    )).toThrow("timeWindow is only supported for selected journal log sources");
+  });
+
   // --- include ---
   it("defaults include.logs.enabled to config default", () => {
     const result = normalizeStandaloneBundleRequest(

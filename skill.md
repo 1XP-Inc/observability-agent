@@ -183,6 +183,15 @@ Standalone rules:
 - Clients cannot request arbitrary file paths or journal units; only registered `OA_SERVICES` entries are available
 - OA uses the current process OS permissions and does not elevate privileges
 
+Standalone log API constraints:
+
+| Field | Applies to | Behavior |
+|-------|------------|----------|
+| `include.logs.tailLines` | File logs, journal logs without `timeWindow` | Passed to `tail -n` for files and `journalctl -n` for journals |
+| `timeWindow.sinceSeconds` | Journal logs only | Relative journal window |
+| `timeWindow.start` / `timeWindow.end` | Journal logs only | Absolute journal window; both fields required together |
+| `limits.maxTotalLogLines` | All standalone logs | Final result budget after filtering and global merge |
+
 K8s selector bundle note:
 - Selector targets list matching pods internally before collecting logs/events/metrics.
 - Scoped tokens therefore need both `pods` capability and the requested data-source capabilities for selector bundles.
@@ -190,7 +199,7 @@ K8s selector bundle note:
 ### Log Line Filters (includePatterns / excludePatterns)
 `include.logs.includePatterns: string[]` keeps only lines containing at least one substring (like `grep`).
 `include.logs.excludePatterns: string[]` removes lines by substring match (like `grep -v`).
-Standalone applies include/exclude filters before the final `maxTotalLogLines` budget. `excludePatterns` also works in K8s mode.
+Standalone applies include/exclude filters before the final `maxTotalLogLines` budget. `includePatterns` is standalone-only; `excludePatterns` also works in K8s mode.
 
 Example:
 ```json
@@ -275,7 +284,7 @@ OA writes a skip record in this case:
 ### Analysis Method
 - Group recurring errors by signature + count occurrences
 - Record first/last occurrence timestamps
-- Drill down: in K8s use narrower selector / single pod; in standalone use single service, shorter time window for follow-up bundles
+- Drill down: in K8s use narrower selector / single pod; in standalone use single service, lower `tailLines`, or a shorter journal `timeWindow`
 
 ---
 
@@ -299,19 +308,21 @@ OA writes a skip record in this case:
 
 ## Defaults
 
-### Common
-| Field | Default |
-|-------|---------|
-| sinceSeconds | 600 (10 min) |
-
 ### K8s Mode
 | Field | Default |
 |-------|---------|
+| sinceSeconds | 600 (10 min) |
 | tailLines | 2000 |
 | namespace | `*` (all) |
 | containers | all |
 | previous | true |
 | timestamps | true (forced true in absolute time mode) |
+
+### Standalone Mode
+| Field | Default |
+|-------|---------|
+| timeWindow | none (journal sources use `tailLines` unless requested) |
+| tailLines | 2000 |
 
 ## Limits
 
@@ -364,6 +375,7 @@ Standalone permission model:
 Standalone time windows:
 - File log requests read the latest configured line budget with `tail`; `sinceSeconds` and absolute windows do not seek or filter file contents.
 - Journal requests use either `timeWindow` (`--since`/`--until`) or the configured line budget, not both.
+- `timeWindow` on a standalone request is rejected when the selected services have no configured journal source.
 
 ---
 
