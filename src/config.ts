@@ -1,3 +1,4 @@
+import net from "node:net";
 import type { ServiceDef } from "./standalone/types";
 
 const MAX_UID = 4_294_967_295;
@@ -29,7 +30,7 @@ export type OAConfig = {
   hardLimits: OALimits;
 
   allowedIps?: string[];
-  trustProxy?: boolean | string;
+  trustProxy?: string;
 
   services?: ServiceDef[];
 
@@ -67,6 +68,46 @@ function envPosInt(name: string, fallback: number): number {
   const n = envInt(name, fallback);
   if (n <= 0) throw new Error(`${name} must be > 0`);
   return n;
+}
+
+function validateTrustProxy(raw: string | undefined): string | undefined {
+  if (raw == null) return undefined;
+  const entries = raw.split(",").map((s) => s.trim()).filter(Boolean);
+  if (entries.length === 0) return undefined;
+
+  for (const entry of entries) {
+    if (entry.toLowerCase() === "true") {
+      throw new Error(
+        "OA_TRUST_PROXY=\"true\" is unsafe because it trusts all proxies; set OA_TRUST_PROXY to a specific proxy IP/CIDR instead",
+      );
+    }
+
+    const parts = entry.split("/");
+    if (parts.length > 2 || !parts[0]) {
+      throw new Error("OA_TRUST_PROXY must contain only proxy IP/CIDR entries");
+    }
+
+    const ipVersion = net.isIP(parts[0]);
+    if (!ipVersion) {
+      throw new Error("OA_TRUST_PROXY must contain only proxy IP/CIDR entries");
+    }
+
+    if (parts.length === 2) {
+      if (!/^\d+$/.test(parts[1])) {
+        throw new Error("OA_TRUST_PROXY must contain only proxy IP/CIDR entries");
+      }
+      const prefix = Number.parseInt(parts[1], 10);
+      const maxPrefix = ipVersion === 4 ? 32 : 128;
+      if (prefix < 0 || prefix > maxPrefix) {
+        throw new Error("OA_TRUST_PROXY must contain only proxy IP/CIDR entries");
+      }
+      if (prefix === 0) {
+        throw new Error("OA_TRUST_PROXY must not trust all proxy addresses");
+      }
+    }
+  }
+
+  return entries.join(",");
 }
 
 function parseServices(): ServiceDef[] | undefined {
@@ -196,8 +237,7 @@ export function loadConfig(): OAConfig {
     ? allowedIpsRaw.split(",").map(s => s.trim()).filter(Boolean)
     : undefined;
 
-  const trustProxyRaw = envString("OA_TRUST_PROXY");
-  const trustProxy = trustProxyRaw === "true" ? true : trustProxyRaw ?? undefined;
+  const trustProxy = validateTrustProxy(envString("OA_TRUST_PROXY"));
 
   const services = parseServices();
   if (mode === "standalone" && !services) {

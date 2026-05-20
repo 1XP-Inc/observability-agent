@@ -55,10 +55,10 @@ describe("parseAllowList", () => {
 });
 
 describe("ipFilterHook", () => {
-  function buildApp(allowedIps: string[]) {
+  function buildApp(allowedIps: string[], trustProxy?: string) {
     const config = createMockConfig({ jwtSecret: SECRET });
     const allowList = parseAllowList(allowedIps);
-    const app = Fastify();
+    const app = Fastify({ trustProxy });
 
     app.addHook("onRequest", ipFilterHook(allowList));
     app.addHook("onRequest", authHook(config));
@@ -136,18 +136,9 @@ describe("ipFilterHook", () => {
     expect(res.statusCode).toBe(200);
     await app.close();
   });
-});
 
-describe("trustProxy 통합", () => {
-  it("trustProxy=true 이면 X-Forwarded-For 헤더에서 IP를 추출한다", async () => {
-    const config = createMockConfig({ jwtSecret: SECRET, trustProxy: true });
-    const allowList = parseAllowList(["203.0.113.42"]);
-    const app = Fastify({ trustProxy: config.trustProxy });
-
-    app.addHook("onRequest", ipFilterHook(allowList));
-    app.addHook("onRequest", authHook(config));
-    app.get("/api/test", async () => ({ ok: true }));
-
+  it("명시적으로 신뢰한 프록시에서만 X-Forwarded-For를 반영한다", async () => {
+    const app = buildApp(["203.0.113.42"], "127.0.0.1");
     const res = await app.inject({
       method: "GET",
       url: "/api/test",
@@ -155,29 +146,25 @@ describe("trustProxy 통합", () => {
         "x-forwarded-for": "203.0.113.42",
         authorization: `Bearer ${validToken()}`,
       },
+      remoteAddress: "127.0.0.1",
     });
     expect(res.statusCode).toBe(200);
     await app.close();
   });
 
-  it("trustProxy=true 이고 X-Forwarded-For 가 차단 IP면 403", async () => {
-    const config = createMockConfig({ jwtSecret: SECRET, trustProxy: true });
-    const allowList = parseAllowList(["203.0.113.42"]);
-    const app = Fastify({ trustProxy: config.trustProxy });
-
-    app.addHook("onRequest", ipFilterHook(allowList));
-    app.addHook("onRequest", authHook(config));
-    app.get("/api/test", async () => ({ ok: true }));
-
+  it("신뢰하지 않은 peer의 spoofed X-Forwarded-For는 무시한다", async () => {
+    const app = buildApp(["203.0.113.42"], "127.0.0.1");
     const res = await app.inject({
       method: "GET",
       url: "/api/test",
       headers: {
-        "x-forwarded-for": "198.51.100.1",
+        "x-forwarded-for": "203.0.113.42",
         authorization: `Bearer ${validToken()}`,
       },
+      remoteAddress: "198.51.100.7",
     });
     expect(res.statusCode).toBe(403);
+    expect(res.json().error).toBe("ip_not_allowed");
     await app.close();
   });
 });
