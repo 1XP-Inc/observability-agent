@@ -173,7 +173,7 @@ All configuration is via environment variables with sensible defaults:
 | `OA_METRICS_TIMEOUT_MS` | `2000` | Per-target metrics scrape timeout |
 | `OA_METRICS_CONCURRENCY` | `10` | K8s metrics scrape concurrency |
 | `OA_ALLOWED_IPS` | *(none)* | Comma-separated IP/CIDR allowlist (e.g. `10.0.0.1,192.168.0.0/16`) |
-| `OA_TRUST_PROXY` | *(none)* | Fastify `trustProxy`; prefer a specific proxy address/CIDR. `"true"` trusts all proxy headers and is unsafe on directly exposed listeners |
+| `OA_TRUST_PROXY` | *(none)* | Fastify `trustProxy` IP/CIDR allowlist for trusted reverse proxies. `"true"` and all-address CIDRs such as `0.0.0.0/0` or `::/0` are rejected |
 | `OA_JWT_ISS` | *(none)* | Optional expected JWT issuer |
 | `OA_JWT_AUD` | *(none)* | Optional expected JWT audience |
 | `OA_DEFAULT_SINCE_SECONDS` | `600` | Default bundle time window |

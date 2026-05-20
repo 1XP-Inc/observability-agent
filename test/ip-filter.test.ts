@@ -55,10 +55,10 @@ describe("parseAllowList", () => {
 });
 
 describe("ipFilterHook", () => {
-  function buildApp(allowedIps: string[]) {
+  function buildApp(allowedIps: string[], trustProxy?: string) {
     const config = createMockConfig({ jwtSecret: SECRET });
     const allowList = parseAllowList(allowedIps);
-    const app = Fastify();
+    const app = Fastify({ trustProxy });
 
     app.addHook("onRequest", ipFilterHook(allowList));
     app.addHook("onRequest", authHook(config));
@@ -134,6 +134,37 @@ describe("ipFilterHook", () => {
       headers: { authorization: `Bearer ${validToken()}` },
     });
     expect(res.statusCode).toBe(200);
+    await app.close();
+  });
+
+  it("명시적으로 신뢰한 프록시에서만 X-Forwarded-For를 반영한다", async () => {
+    const app = buildApp(["203.0.113.42"], "127.0.0.1");
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/test",
+      headers: {
+        "x-forwarded-for": "203.0.113.42",
+        authorization: `Bearer ${validToken()}`,
+      },
+      remoteAddress: "127.0.0.1",
+    });
+    expect(res.statusCode).toBe(200);
+    await app.close();
+  });
+
+  it("신뢰하지 않은 peer의 spoofed X-Forwarded-For는 무시한다", async () => {
+    const app = buildApp(["203.0.113.42"], "127.0.0.1");
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/test",
+      headers: {
+        "x-forwarded-for": "203.0.113.42",
+        authorization: `Bearer ${validToken()}`,
+      },
+      remoteAddress: "198.51.100.7",
+    });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error).toBe("ip_not_allowed");
     await app.close();
   });
 });

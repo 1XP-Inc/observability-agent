@@ -543,6 +543,12 @@ describe("loadConfig", () => {
       expect(() => loadConfig()).toThrow("OA_TRUST_PROXY=\"true\" is unsafe");
     });
 
+    it('"TRUE" 도 안전하지 않아 에러', () => {
+      process.env.OA_JWT_SECRET = "test-secret-key-for-config-tests!";
+      process.env.OA_TRUST_PROXY = "TRUE";
+      expect(() => loadConfig()).toThrow("OA_TRUST_PROXY=\"true\" is unsafe");
+    });
+
     it("문자열 값은 그대로 전달한다", () => {
       process.env.OA_JWT_SECRET = "test-secret-key-for-config-tests!";
       process.env.OA_TRUST_PROXY = "127.0.0.1";
@@ -553,6 +559,36 @@ describe("loadConfig", () => {
       process.env.OA_JWT_SECRET = "test-secret-key-for-config-tests!";
       process.env.OA_TRUST_PROXY = "10.0.0.0/8";
       expect(loadConfig().trustProxy).toBe("10.0.0.0/8");
+    });
+
+    it("컴마 구분 IP/CIDR 리스트를 trim한다", () => {
+      process.env.OA_JWT_SECRET = "test-secret-key-for-config-tests!";
+      process.env.OA_TRUST_PROXY = " 127.0.0.1 , 10.0.0.0/8 ";
+      expect(loadConfig().trustProxy).toBe("127.0.0.1,10.0.0.0/8");
+    });
+
+    it("전체 IPv4 CIDR은 안전하지 않아 에러", () => {
+      process.env.OA_JWT_SECRET = "test-secret-key-for-config-tests!";
+      process.env.OA_TRUST_PROXY = "0.0.0.0/0";
+      expect(() => loadConfig()).toThrow("OA_TRUST_PROXY must not trust all proxy addresses");
+    });
+
+    it("전체 IPv6 CIDR은 안전하지 않아 에러", () => {
+      process.env.OA_JWT_SECRET = "test-secret-key-for-config-tests!";
+      process.env.OA_TRUST_PROXY = "::/0";
+      expect(() => loadConfig()).toThrow("OA_TRUST_PROXY must not trust all proxy addresses");
+    });
+
+    it("IP/CIDR이 아닌 값은 에러", () => {
+      process.env.OA_JWT_SECRET = "test-secret-key-for-config-tests!";
+      process.env.OA_TRUST_PROXY = "loopback";
+      expect(() => loadConfig()).toThrow("OA_TRUST_PROXY must contain only proxy IP/CIDR entries");
+    });
+
+    it("CIDR prefix 범위가 잘못되면 에러", () => {
+      process.env.OA_JWT_SECRET = "test-secret-key-for-config-tests!";
+      process.env.OA_TRUST_PROXY = "127.0.0.1/33";
+      expect(() => loadConfig()).toThrow("OA_TRUST_PROXY must contain only proxy IP/CIDR entries");
     });
 
     it("빈 문자열이면 undefined", () => {

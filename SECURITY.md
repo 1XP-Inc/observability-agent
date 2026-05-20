@@ -33,8 +33,8 @@ commit, reproduction steps, impact, and any suggested mitigation.
 - JWTs without authorization scope claims retain full access for compatibility
   with existing deployments. Issue scoped tokens with `admin: false`,
   `capabilities`, and namespace/service allowlists to opt into least privilege.
-- `OA_TRUST_PROXY=true` trusts all forwarded IP headers. Use a concrete trusted
-  proxy address or CIDR when the listener is reachable by clients.
+- `OA_TRUST_PROXY` accepts only concrete trusted proxy IP/CIDR entries. Values
+  that trust every peer, such as `true`, `0.0.0.0/0`, and `::/0`, are rejected.
 - Standalone file, journal, and metrics sources are operator-configured through
   `OA_SERVICES`. OA does not block private network metrics URLs or elevate OS
   permissions for logs.
