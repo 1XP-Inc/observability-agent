@@ -537,10 +537,10 @@ describe("loadConfig", () => {
       expect(loadConfig().trustProxy).toBeUndefined();
     });
 
-    it('"true" 이면 boolean true', () => {
+    it('"true" 이면 안전하지 않아 에러', () => {
       process.env.OA_JWT_SECRET = "test-secret-key-for-config-tests!";
       process.env.OA_TRUST_PROXY = "true";
-      expect(loadConfig().trustProxy).toBe(true);
+      expect(() => loadConfig()).toThrow("OA_TRUST_PROXY=\"true\" is unsafe");
     });
 
     it("문자열 값은 그대로 전달한다", () => {

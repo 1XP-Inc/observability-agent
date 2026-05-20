@@ -197,7 +197,12 @@ export function loadConfig(): OAConfig {
     : undefined;
 
   const trustProxyRaw = envString("OA_TRUST_PROXY");
-  const trustProxy = trustProxyRaw === "true" ? true : trustProxyRaw ?? undefined;
+  if (trustProxyRaw === "true") {
+    throw new Error(
+      "OA_TRUST_PROXY=\"true\" is unsafe because it trusts all proxies; set OA_TRUST_PROXY to a specific proxy IP/CIDR instead",
+    );
+  }
+  const trustProxy = trustProxyRaw ?? undefined;
 
   const services = parseServices();
   if (mode === "standalone" && !services) {
