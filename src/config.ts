@@ -30,7 +30,7 @@ export type OAConfig = {
   hardLimits: OALimits;
 
   allowedIps?: string[];
-  trustProxy?: boolean | string;
+  trustProxy?: string;
 
   services?: ServiceDef[];
 
