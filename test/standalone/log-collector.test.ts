@@ -370,6 +370,32 @@ describe("collectStandaloneLogs", () => {
     fs.unlinkSync(logFile);
   });
 
+  it("uses a transitive rank when timestamped and untimestamped candidates are interleaved", async () => {
+    const logFile = tmpLog(
+      "2024-01-02T00:00:00Z newer timestamped\n" +
+      "untimestamped after newer\n" +
+      "2024-01-01T00:00:00Z older timestamped\n"
+    );
+    const services: ServiceDef[] = [{ name: "svc1", logs: [logFile] }];
+    const { writer, records } = makeWriter();
+
+    await collectStandaloneLogs({
+      writer,
+      services,
+      req: makeReq({ limits: { maxTotalLogLines: 1, sinceSecondsMax: 3600, metricsTimeoutMs: 2000 } }),
+    });
+
+    expect(logLineRecords(records).map((r: any) => r.line)).toEqual(["untimestamped after newer"]);
+    expect(logSummary(records)).toMatchObject({
+      type: "log_summary",
+      lineLimited: true,
+      matchedLogRecords: 3,
+      returnedLogRecords: 1,
+    });
+
+    fs.unlinkSync(logFile);
+  });
+
   it("handles multiple services and files", async () => {
     const f1 = tmpLog("2024-01-01T00:00:00Z svc1-line\n");
     const f2 = tmpLog("2024-01-01T00:00:00Z svc2-line\n");

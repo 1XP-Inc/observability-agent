@@ -179,7 +179,7 @@ Standalone rules:
 - File logs are collected via `tail -n <include.logs.tailLines>` from paths configured per service
 - Journal logs are collected via `journalctl`; they use `timeWindow` when supplied, otherwise `include.logs.tailLines`
 - When logs are enabled, `timeWindow` is accepted only when selected standalone services include a configured journal source; file logs are never time-filtered
-- OA applies include/exclude filters before the final `maxTotalLogLines`, then globally merges matching records by parsed timestamp when both compared records have timestamps; otherwise it keeps source read order
+- OA applies include/exclude filters before the final `maxTotalLogLines`, then globally merges matching records by parsed timestamp. Untimestamped records inherit the previous timestamp seen from the same source for ranking, or source read order when no previous source timestamp exists
 - Clients cannot request arbitrary file paths or journal units; only registered `OA_SERVICES` entries are available
 - OA uses the current process OS permissions and does not elevate privileges
 

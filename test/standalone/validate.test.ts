@@ -1,4 +1,8 @@
-import { assertStandaloneLogSourceConstraints, normalizeStandaloneBundleRequest } from "../../src/standalone/validate";
+import {
+  assertStandaloneLogSourceConstraints,
+  assertStandaloneTargetServicesKnown,
+  normalizeStandaloneBundleRequest,
+} from "../../src/standalone/validate";
 import { createMockConfig } from "../helpers";
 import type { ServiceDef } from "../../src/standalone/types";
 
@@ -38,12 +42,22 @@ describe("normalizeStandaloneBundleRequest", () => {
     expect(() => normalizeStandaloneBundleRequest({ target: { kind: "services", services: [] } }, cfg(), services)).toThrow("target.services must be a non-empty array");
   });
 
-  it("throws 400 for unknown service name", () => {
-    expect(() => normalizeStandaloneBundleRequest(
+  it("normalizes unknown service names before post-auth target checks", () => {
+    const result = normalizeStandaloneBundleRequest(
       { target: { kind: "services", services: ["unknown-svc"] } },
       cfg(),
       services,
-    )).toThrow("Unknown service: unknown-svc");
+    );
+    expect(result.target).toEqual({ kind: "services", services: ["unknown-svc"] });
+  });
+
+  it("post-auth target checks reject unknown service names", () => {
+    const result = normalizeStandaloneBundleRequest(
+      { target: { kind: "services", services: ["unknown-svc"] } },
+      cfg(),
+      services,
+    );
+    expect(() => assertStandaloneTargetServicesKnown(result, services)).toThrow("Unknown service: unknown-svc");
   });
 
   it("throws 400 for invalid target kind", () => {
@@ -480,6 +494,17 @@ describe("normalizeStandaloneBundleRequest", () => {
       cfg(),
       services,
     )).toThrow("Invalid datetime");
+  });
+
+  it("throws 400 for calendar-invalid datetime strings", () => {
+    expect(() => normalizeStandaloneBundleRequest(
+      {
+        target: { kind: "services", services: ["solana-validator"] },
+        timeWindow: { start: "2024-02-30T00:00:00Z", end: "2024-03-01T00:00:00Z" },
+      },
+      cfg(),
+      services,
+    )).toThrow("Invalid datetime: timeWindow.start");
   });
 
   it("throws 400 for non-string in start", () => {

@@ -27,12 +27,13 @@ type SourceSummary = LogSourceBase & {
 type SourceState = {
   key: string;
   summary: SourceSummary;
+  lastTimestampMs?: number;
 };
 
 type LogCandidate = {
   sourceKey: string;
   sequence: number;
-  sortMs?: number;
+  rankTimeMs?: number;
   record: Record<string, unknown>;
 };
 
@@ -185,9 +186,13 @@ function timeBounds(timeWindow: NonNullable<StandaloneNormalizedRequest["timeWin
 }
 
 function compareCandidateRank(a: LogCandidate, b: LogCandidate): number {
-  if (a.sortMs != null && b.sortMs != null) {
-    const byTime = a.sortMs - b.sortMs;
-    if (byTime !== 0) return byTime;
+  if (a.rankTimeMs != null && b.rankTimeMs != null) {
+    const byRankTime = a.rankTimeMs - b.rankTimeMs;
+    if (byRankTime !== 0) return byRankTime;
+  } else if (a.rankTimeMs != null) {
+    return 1;
+  } else if (b.rankTimeMs != null) {
+    return -1;
   }
   return a.sequence - b.sequence;
 }
@@ -234,10 +239,14 @@ export async function collectStandaloneLogs(params: {
     const parsed = filterLine(line, sourceFilters);
     if (!parsed) return;
     state.summary.matchedLogRecords++;
+    const rankTimeMs = parsed.sortMs ?? state.lastTimestampMs;
+    if (parsed.sortMs != null) {
+      state.lastTimestampMs = parsed.sortMs;
+    }
     candidates.add({
       sourceKey: state.key,
       sequence: nextSequence++,
-      sortMs: parsed.sortMs,
+      rankTimeMs,
       record: {
         type: "log",
         ...base,

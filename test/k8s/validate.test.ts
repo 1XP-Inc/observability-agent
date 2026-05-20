@@ -174,6 +174,20 @@ describe("normalizeBundleRequest", () => {
       ).toThrow("Invalid datetime: timeWindow.start");
     });
 
+    it("rejects calendar-invalid datetime strings", () => {
+      expect(() =>
+        normalizeBundleRequest(
+          minimalSelector({
+            timeWindow: {
+              start: "2024-02-30T00:00:00Z",
+              end: "2024-03-01T00:00:00Z",
+            },
+          }),
+          config,
+        ),
+      ).toThrow("Invalid datetime: timeWindow.start");
+    });
+
     it("rejects non-string datetime values", () => {
       expect(() =>
         normalizeBundleRequest(

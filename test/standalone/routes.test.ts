@@ -308,6 +308,23 @@ describe("POST /v1/bundles (standalone)", () => {
     await app.close();
   });
 
+  it("returns 403 before unknown-service validation for scoped tokens outside service scope", async () => {
+    const bundleManager = createMockBundleManager();
+    const { app } = buildApp({ bundleManagerOverride: bundleManager });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/bundles",
+      headers: authHeader({ allowedServices: ["solana-*"], capabilities: ["logs", "metrics"] }),
+      payload: { target: { kind: "services", services: ["rpc-missing"] } },
+    });
+
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error).toBe("forbidden");
+    expect(bundleManager.create).not.toHaveBeenCalled();
+    await app.close();
+  });
+
   it("returns 400 when standalone timeWindow targets only file log sources", async () => {
     const bundleManager = createMockBundleManager();
     const { app } = buildApp({ bundleManagerOverride: bundleManager });

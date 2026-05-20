@@ -55,8 +55,22 @@ function parseIso8601Z(name: string, v: unknown): { iso: string; ms: number } {
   if (!iso.endsWith("Z")) {
     throw new HttpError(400, `${name} must be ISO8601 UTC (end with 'Z')`);
   }
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?Z$/.exec(iso);
+  if (!match) throw new HttpError(400, `Invalid datetime: ${name}`);
   const ms = Date.parse(iso);
   if (!Number.isFinite(ms) || Number.isNaN(ms)) throw new HttpError(400, `Invalid datetime: ${name}`);
+  const [, yearRaw, monthRaw, dayRaw, hourRaw, minuteRaw, secondRaw] = match;
+  const d = new Date(ms);
+  if (
+    d.getUTCFullYear() !== Number(yearRaw) ||
+    d.getUTCMonth() + 1 !== Number(monthRaw) ||
+    d.getUTCDate() !== Number(dayRaw) ||
+    d.getUTCHours() !== Number(hourRaw) ||
+    d.getUTCMinutes() !== Number(minuteRaw) ||
+    d.getUTCSeconds() !== Number(secondRaw)
+  ) {
+    throw new HttpError(400, `Invalid datetime: ${name}`);
+  }
   return { iso, ms };
 }
 

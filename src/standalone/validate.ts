@@ -47,8 +47,22 @@ function parseIso8601Z(name: string, v: unknown): { iso: string; ms: number } {
   if (!iso.endsWith("Z")) {
     throw new HttpError(400, `${name} must be ISO8601 UTC (end with 'Z')`);
   }
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?Z$/.exec(iso);
+  if (!match) throw new HttpError(400, `Invalid datetime: ${name}`);
   const ms = Date.parse(iso);
   if (!Number.isFinite(ms) || Number.isNaN(ms)) throw new HttpError(400, `Invalid datetime: ${name}`);
+  const [, yearRaw, monthRaw, dayRaw, hourRaw, minuteRaw, secondRaw] = match;
+  const d = new Date(ms);
+  if (
+    d.getUTCFullYear() !== Number(yearRaw) ||
+    d.getUTCMonth() + 1 !== Number(monthRaw) ||
+    d.getUTCDate() !== Number(dayRaw) ||
+    d.getUTCHours() !== Number(hourRaw) ||
+    d.getUTCMinutes() !== Number(minuteRaw) ||
+    d.getUTCSeconds() !== Number(secondRaw)
+  ) {
+    throw new HttpError(400, `Invalid datetime: ${name}`);
+  }
   return { iso, ms };
 }
 
@@ -90,6 +104,16 @@ function selectedServicesForRequest(req: StandaloneNormalizedRequest, services: 
   if (req.target.kind === "all") return services;
   const selected = new Set(req.target.services);
   return services.filter((svc) => selected.has(svc.name));
+}
+
+export function assertStandaloneTargetServicesKnown(req: StandaloneNormalizedRequest, services: ServiceDef[]): void {
+  if (req.target.kind === "all") return;
+  const known = new Set(services.map((svc) => svc.name));
+  for (const serviceName of req.target.services) {
+    if (!known.has(serviceName)) {
+      throw new HttpError(400, `Unknown service: ${serviceName}`);
+    }
+  }
 }
 
 export function assertStandaloneLogSourceConstraints(req: StandaloneNormalizedRequest, services: ServiceDef[]): void {
@@ -135,7 +159,6 @@ export function normalizeStandaloneBundleRequest(
   if (!targetObj) throw new HttpError(400, "Missing required field: target");
 
   const serviceNames = asStringArray("target.services", targetObj.services);
-  const knownByName = new Map(knownServices.map((s) => [s.name, s]));
 
   let target: StandaloneNormalizedRequest["target"];
   if (targetObj.kind === "all") {
@@ -146,12 +169,6 @@ export function normalizeStandaloneBundleRequest(
   } else if (targetObj.kind === "services" || serviceNames) {
     if (!serviceNames || serviceNames.length === 0) {
       throw new HttpError(400, "target.services must be a non-empty array");
-    }
-    for (const svc of serviceNames) {
-      const service = knownByName.get(svc);
-      if (!service) {
-        throw new HttpError(400, `Unknown service: ${svc}`);
-      }
     }
     target = { kind: "services", services: serviceNames };
   } else {
