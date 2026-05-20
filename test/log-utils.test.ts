@@ -17,6 +17,13 @@ describe("log-utils", () => {
     expect(parseLogLine("123 status code", true)).toEqual({ msg: "123 status code" });
   });
 
+  it("rejects calendar-invalid timestamps", () => {
+    expect(parseLineTimeMs("2024-02-30T00:00:00Z")).toBeUndefined();
+    expect(parseLogLine("2024-02-30T00:00:00Z normalized", true)).toEqual({
+      msg: "2024-02-30T00:00:00Z normalized",
+    });
+  });
+
   it("keeps the full line when timestamp splitting is disabled", () => {
     expect(parseLogLine("2024-01-01T00:00:00Z hello", false)).toEqual({ msg: "2024-01-01T00:00:00Z hello" });
   });

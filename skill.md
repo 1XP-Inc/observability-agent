@@ -179,7 +179,7 @@ Standalone rules:
 - File logs are collected via `tail -n <include.logs.tailLines>` from paths configured per service
 - Journal logs are collected via `journalctl`; they use `timeWindow` when supplied, otherwise `include.logs.tailLines`
 - When logs are enabled, `timeWindow` is accepted only when selected standalone services include a configured journal source; file logs are never time-filtered
-- OA applies include/exclude filters before the final `maxTotalLogLines`, then globally merges matching records by parsed timestamp. Untimestamped records inherit the previous timestamp seen from the same source for ranking, or source read order when no previous source timestamp exists
+- OA applies include/exclude filters before the final `maxTotalLogLines`, then globally merges matching records by parsed timestamp. Untimestamped records inherit the previous timestamp seen from the same source for ranking, or source read order when no previous source timestamp exists. Diagnostic skipped/error records are emitted outside this returned-line budget and counted as `diagnosticRecords` in `log_summary`
 - Clients cannot request arbitrary file paths or journal units; only registered `OA_SERVICES` entries are available
 - OA uses the current process OS permissions and does not elevate privileges
 
@@ -190,7 +190,7 @@ Standalone log API constraints:
 | `include.logs.tailLines` | File logs, journal logs without `timeWindow` | Passed to `tail -n` for files and `journalctl -n` for journals |
 | `timeWindow.sinceSeconds` | Journal logs only | Relative journal window; rejected when logs are enabled and selected services have no journal source |
 | `timeWindow.start` / `timeWindow.end` | Journal logs only | Absolute journal window; both fields required together; rejected when logs are enabled and selected services have no journal source |
-| `limits.maxTotalLogLines` | All standalone logs | Final result budget after filtering and global merge |
+| `limits.maxTotalLogLines` | Standalone log lines | Final returned-line budget after filtering and global merge; diagnostic skipped/error records are outside this cap |
 
 K8s selector bundle note:
 - Selector targets list matching pods internally before collecting logs/events/metrics.
@@ -239,7 +239,7 @@ Example:
 | `log` | File log | service, file, ts, line, skipped?, reason? |
 | `log` | Journal log | service, journal, journalScope?, journalUser?, ts, line, skipped?, reason? |
 | `log_error` | User journal error | service, journal, journalScope, journalUser, ts, reason, error |
-| `log_summary` | Log budget/source summary | ts, lineLimited, matchedLogRecords, returnedLogRecords, sources[] |
+| `log_summary` | Log budget/source summary | ts, lineLimited, matchedLogRecords, returnedLogRecords, diagnosticRecords, sources[] |
 | `metrics_text` | Service metrics | service, url, ts, ok/skipped/error, content |
 
 Standalone log skip reasons:

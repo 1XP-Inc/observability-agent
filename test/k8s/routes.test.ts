@@ -325,6 +325,88 @@ describe("GET /v1/pods", () => {
     await app.close();
   });
 
+  it("filters q across paginated all-namespace pod results", async () => {
+    const coreV1 = createMockCoreV1Api();
+    (coreV1 as any).listPodForAllNamespaces.mockImplementation(async (opts?: any) => ({
+      body: opts?._continue === "page-2"
+        ? {
+            items: [
+              createMockPod({ namespace: "ns-b", name: "frontend-second" }),
+              createMockPod({ namespace: "ns-b", name: "worker-second" }),
+            ],
+            metadata: {},
+          }
+        : {
+            items: [
+              createMockPod({ namespace: "ns-a", name: "worker-first" }),
+              createMockPod({ namespace: "ns-a", name: "frontend-first" }),
+            ],
+            metadata: { _continue: "page-2" },
+          },
+    }));
+
+    const { app } = buildApp({ coreV1Override: coreV1 });
+    const res = await app.inject({
+      method: "GET",
+      url: "/v1/pods?q=frontend",
+      headers: authHeader(),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().items.map((p: any) => p.name)).toEqual([
+      "frontend-first",
+      "frontend-second",
+    ]);
+    expect((coreV1 as any).listPodForAllNamespaces).toHaveBeenCalledTimes(2);
+    expect((coreV1 as any).listPodForAllNamespaces).toHaveBeenNthCalledWith(1, {
+      labelSelector: undefined,
+      limit: 500,
+    });
+    expect((coreV1 as any).listPodForAllNamespaces).toHaveBeenNthCalledWith(2, {
+      labelSelector: undefined,
+      limit: 500,
+      _continue: "page-2",
+    });
+    await app.close();
+  });
+
+  it("follows namespaced pod pagination with selector and scoped auth", async () => {
+    const coreV1 = createMockCoreV1Api();
+    (coreV1 as any).listNamespacedPod.mockImplementation(async (opts?: any) => ({
+      body: opts?._continue === "next"
+        ? {
+            items: [createMockPod({ namespace: "prod", name: "api-second" })],
+            metadata: {},
+          }
+        : {
+            items: [createMockPod({ namespace: "prod", name: "worker-first" })],
+            metadata: { _continue: "next" },
+          },
+    }));
+
+    const { app } = buildApp({ coreV1Override: coreV1 });
+    const res = await app.inject({
+      method: "GET",
+      url: "/v1/pods?ns=prod&selector=app%3Dapi&q=api",
+      headers: authHeader({ allowedNamespaces: ["prod"], capabilities: ["pods"] }),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().items.map((p: any) => p.name)).toEqual(["api-second"]);
+    expect((coreV1 as any).listNamespacedPod).toHaveBeenCalledTimes(2);
+    expect((coreV1 as any).listNamespacedPod).toHaveBeenNthCalledWith(1, {
+      namespace: "prod",
+      labelSelector: "app=api",
+      limit: 500,
+    });
+    expect((coreV1 as any).listNamespacedPod).toHaveBeenNthCalledWith(2, {
+      namespace: "prod",
+      labelSelector: "app=api",
+      limit: 500,
+      _continue: "next",
+    });
+    expect((coreV1 as any).listPodForAllNamespaces).not.toHaveBeenCalled();
+    await app.close();
+  });
+
   it("returns all pods when q is not provided (no filter)", async () => {
     const coreV1 = createMockCoreV1Api();
     const pods = [

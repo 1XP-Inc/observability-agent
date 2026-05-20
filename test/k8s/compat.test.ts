@@ -69,6 +69,22 @@ describe("listPodsAllNamespaces", () => {
       });
     });
 
+    it("passes continue token as _continue", async () => {
+      const data = { items: [], metadata: {} };
+      const coreV1: any = { listPodForAllNamespaces: newStyleMock(data) };
+      await listPodsAllNamespaces({
+        coreV1,
+        labelSelector: "app=web",
+        limit: 100,
+        continueToken: "next-page",
+      });
+      expect(coreV1.listPodForAllNamespaces).toHaveBeenCalledWith({
+        labelSelector: "app=web",
+        limit: 100,
+        _continue: "next-page",
+      });
+    });
+
     it("returns result directly when no body wrapper", async () => {
       const data = { items: [] };
       const coreV1: any = { listPodForAllNamespaces: newStyleMockDirect(data) };
@@ -161,6 +177,27 @@ describe("listPodsNamespaced", () => {
         undefined,
         undefined,
         undefined,
+        undefined,
+        "app=api",
+        25,
+      );
+    });
+
+    it("passes continue token in the positional _continue slot", async () => {
+      const fn = oldStyleMock({ items: [] });
+      const coreV1: any = { listNamespacedPod: fn };
+      await listPodsNamespaced({
+        coreV1,
+        namespace: "staging",
+        labelSelector: "app=api",
+        limit: 25,
+        continueToken: "next-page",
+      });
+      expect(fn).toHaveBeenCalledWith(
+        "staging",
+        undefined,
+        undefined,
+        "next-page",
         undefined,
         "app=api",
         25,
@@ -383,30 +420,26 @@ describe("readPodLog", () => {
       expect(result).toBe("direct-old-log");
     });
 
-    it("shape 2: verifies second call has different arg order", async () => {
-      let callCount = 0;
-      const fn = vi.fn(async (...args: any[]) => {
-        callCount++;
-        if (callCount === 1) throw new Error("shape 1 failed");
-        return { body: "ok" };
-      });
+    it("uses shape 2 first when sinceTime is provided", async () => {
+      const fn = vi.fn(async () => ({ body: "absolute-log" }));
       Object.defineProperty(fn, "length", { value: 10 });
       const coreV1: any = { readNamespacedPodLog: fn };
       await readPodLog({
         coreV1,
         ...baseParams,
+        sinceSeconds: undefined,
         sinceTime: "2024-01-01T00:00:00Z",
       });
       // Shape 2: (name, namespace, container, follow, pretty, previous, sinceSeconds, sinceTime, timestamps, tailLines, limitBytes)
-      expect(fn).toHaveBeenNthCalledWith(
-        2,
+      expect(fn).toHaveBeenCalledTimes(1);
+      expect(fn).toHaveBeenCalledWith(
         "pod-1",                      // name
         "ns",                         // namespace
         "main",                       // container
         false,                        // follow
         undefined,                    // pretty
         false,                        // previous
-        300,                          // sinceSeconds
+        undefined,                    // sinceSeconds
         "2024-01-01T00:00:00Z",       // sinceTime
         true,                         // timestamps
         100,                          // tailLines

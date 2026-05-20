@@ -167,6 +167,20 @@ describe("normalizeStandaloneBundleRequest", () => {
     )).toThrow("timeWindow.end must be >= timeWindow.start");
   });
 
+  it("throws 400 when sub-millisecond end < start", () => {
+    expect(() => normalizeStandaloneBundleRequest(
+      {
+        target: { kind: "services", services: ["solana-validator"] },
+        timeWindow: {
+          start: "2024-01-01T00:00:00.9999Z",
+          end: "2024-01-01T00:00:00.9998Z",
+        },
+      },
+      cfg(),
+      services,
+    )).toThrow("timeWindow.end must be >= timeWindow.start");
+  });
+
   it("throws 400 when time range exceeds sinceSecondsMax", () => {
     expect(() => normalizeStandaloneBundleRequest(
       {
@@ -445,6 +459,18 @@ describe("normalizeStandaloneBundleRequest", () => {
     );
     expect(result.include.logs.enabled).toBe(false);
     expect(result.include.metrics.enabled).toBe(true);
+  });
+
+  it.each([
+    ["include.logs", { logs: false }],
+    ["include.events", { events: false }],
+    ["include.metrics", { metrics: false }],
+  ])("throws 400 for malformed %s child values", (path, include) => {
+    expect(() => normalizeStandaloneBundleRequest(
+      { target: { kind: "services", services: ["solana-validator"] }, include },
+      cfg(),
+      services,
+    )).toThrow(`Invalid object: ${path}`);
   });
 
   // --- non-string exclude patterns ---

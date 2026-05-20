@@ -128,6 +128,29 @@ describe("collectStandaloneLogs", () => {
     });
   });
 
+  it("reports diagnostic log records outside the returned log line budget", async () => {
+    const services: ServiceDef[] = [
+      { name: "svc1", logs: ["/tmp/nonexistent-log-file-12345-a.log"] },
+      { name: "svc2", logs: ["/tmp/nonexistent-log-file-12345-b.log"] },
+    ];
+    const { writer, records } = makeWriter();
+
+    await collectStandaloneLogs({
+      writer,
+      services,
+      req: makeReq({ limits: { maxTotalLogLines: 1, sinceSecondsMax: 3600, metricsTimeoutMs: 2000 } }),
+    });
+
+    expect(records.filter((r: any) => r.type === "log" && r.skipped)).toHaveLength(2);
+    expect(logSummary(records)).toMatchObject({
+      type: "log_summary",
+      lineLimited: false,
+      matchedLogRecords: 0,
+      returnedLogRecords: 0,
+      diagnosticRecords: 2,
+    });
+  });
+
   it("applies excludePatterns", async () => {
     const logFile = tmpLog("2024-01-01T00:00:00Z healthcheck ok\n2024-01-01T00:00:01Z important msg\n");
     const services: ServiceDef[] = [{ name: "svc1", logs: [logFile] }];
@@ -142,6 +165,33 @@ describe("collectStandaloneLogs", () => {
     const logRecords = logLineRecords(records);
     expect(logRecords.length).toBe(1);
     expect(logRecords[0].line).toBe("important msg");
+
+    fs.unlinkSync(logFile);
+  });
+
+  it("applies include and exclude patterns to the raw timestamped line", async () => {
+    const logFile = tmpLog(
+      "2024-01-01T00:00:00Z keep by timestamp\n" +
+      "2024-01-02T00:00:00Z remove by timestamp\n" +
+      "2024-02-01T00:00:00Z ignore by include\n"
+    );
+    const services: ServiceDef[] = [{ name: "svc1", logs: [logFile] }];
+    const { writer, records } = makeWriter();
+
+    await collectStandaloneLogs({
+      writer,
+      services,
+      req: makeReq({
+        include: {
+          logs: { enabled: true, includePatterns: ["2024-01"], excludePatterns: ["2024-01-02"] },
+          metrics: { enabled: false },
+        },
+      }),
+    });
+
+    expect(logLineRecords(records).map((r: any) => r.line)).toEqual([
+      "keep by timestamp",
+    ]);
 
     fs.unlinkSync(logFile);
   });
@@ -168,6 +218,39 @@ describe("collectStandaloneLogs", () => {
     });
 
     expect(logLineRecords(records).map((r: any) => r.line)).toEqual(["error matched"]);
+
+    fs.unlinkSync(logFile);
+  });
+
+  it.each([
+    ["includePatterns", { includePatterns: ["error"], excludePatterns: [] }],
+    ["excludePatterns", { includePatterns: [], excludePatterns: ["routine"] }],
+  ])("inherits timestamps from source lines removed by %s", async (_name, filters) => {
+    const logFile = tmpLog(
+      "2024-01-01T00:00:00Z first error\n" +
+      "2024-01-03T00:00:00Z routine status\n" +
+      "untimestamped error after source timestamp\n" +
+      "2024-01-02T00:00:00Z second error\n"
+    );
+    const services: ServiceDef[] = [{ name: "svc1", logs: [logFile] }];
+    const { writer, records } = makeWriter();
+
+    await collectStandaloneLogs({
+      writer,
+      services,
+      req: makeReq({
+        include: { logs: { enabled: true, ...filters }, metrics: { enabled: false } },
+        limits: { maxTotalLogLines: 1, sinceSecondsMax: 3600, metricsTimeoutMs: 2000 },
+      }),
+    });
+
+    expect(logLineRecords(records).map((r: any) => r.line)).toEqual(["untimestamped error after source timestamp"]);
+    expect(logSummary(records)).toMatchObject({
+      type: "log_summary",
+      lineLimited: true,
+      matchedLogRecords: 3,
+      returnedLogRecords: 1,
+    });
 
     fs.unlinkSync(logFile);
   });

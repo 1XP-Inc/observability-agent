@@ -150,7 +150,7 @@ Standalone targets can also use `{ "target": { "kind": "all" } }` to collect fro
 | `log` | Standalone | File log line (service, file, ts, line) |
 | `log` | Standalone | Journal log line (service, journal, ts, line, journalScope?, journalUser?) |
 | `log_error` | Standalone | User journal configuration or permission error (service, journal, journalScope, journalUser, ts, reason, error) |
-| `log_summary` | Standalone | Log budget/source summary (lineLimited, matchedLogRecords, returnedLogRecords, sources) |
+| `log_summary` | Standalone | Log budget/source summary (lineLimited, matchedLogRecords, returnedLogRecords, diagnosticRecords, sources) |
 | `event` | K8s only | K8s event (reason, message, involvedObject) |
 | `metrics_text` | K8s | Pod metrics scrape (namespace, pod, port, path) |
 | `metrics_text` | Standalone | Service metrics scrape (service, url) |
@@ -216,7 +216,7 @@ All configuration is via environment variables with sensible defaults:
 
 Standalone collection is allowlisted by `OA_SERVICES`: API clients choose registered service names, not arbitrary file paths, journal units, or metrics URLs. OA does not elevate privileges. File logs and journal logs are readable only when the OA process already has the required OS permissions. For systemd, `journalctl` can show all system and user journals only when the current process account already has journal access (for example, root or an account in `systemd-journal`). Without system journal access, OA returns a skipped `log` record with `reason: "journal_permission_denied"` when journalctl reports a permission problem. Without user journal access, or when `journalUser` cannot be resolved, OA returns a `log_error` record with `journalScope` and `journalUser`.
 
-Standalone file logs are collected with `tail -n <include.logs.tailLines>` and are not time-filtered. Standalone journal logs use either `timeWindow` (`--since`/`--until`) or `include.logs.tailLines` (`-n`), not both. When logs are enabled, `timeWindow` is accepted only for selected services with a configured journal source. Include/exclude filtering is applied before the final `maxTotalLogLines` output budget; matching records are globally merged by parsed timestamp. Untimestamped records inherit the previous timestamp seen from the same source for ranking, or source read order when no previous source timestamp exists.
+Standalone file logs are collected with `tail -n <include.logs.tailLines>` and are not time-filtered. Standalone journal logs use either `timeWindow` (`--since`/`--until`) or `include.logs.tailLines` (`-n`), not both. When logs are enabled, `timeWindow` is accepted only for selected services with a configured journal source. Include/exclude filtering is applied before the final `maxTotalLogLines` output budget; matching records are globally merged by parsed timestamp. Untimestamped records inherit the previous timestamp seen from the same source for ranking, or source read order when no previous source timestamp exists. Diagnostic skipped/error records are emitted outside this returned-line budget and counted as `diagnosticRecords` in `log_summary`.
 
 Standalone log request constraints:
 
@@ -225,7 +225,7 @@ Standalone log request constraints:
 | `include.logs.tailLines` | File logs, journal logs without `timeWindow` | Source read budget; passed to `tail -n` for files and `journalctl -n` for journals |
 | `timeWindow.sinceSeconds` | Journal logs only | Relative journal window; rejected when logs are enabled and selected services have no journal source |
 | `timeWindow.start` / `timeWindow.end` | Journal logs only | Absolute journal window; both fields are required together; rejected when logs are enabled and selected services have no journal source |
-| `limits.maxTotalLogLines` | All standalone logs | Final returned-record budget after include/exclude filtering and cross-source merge |
+| `limits.maxTotalLogLines` | Standalone log lines | Final returned-line budget after include/exclude filtering and cross-source merge; diagnostic skipped/error records are outside this cap |
 
 Metrics URLs are configured by the operator and are fetched as-is for compatibility. Treat them as trusted configuration: OA does not block localhost, private network, or metadata-address targets by default.
 

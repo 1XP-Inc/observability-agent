@@ -18,6 +18,7 @@ export function podToRef(pod: any): PodRef {
   return {
     namespace,
     name,
+    uid: typeof pod.metadata?.uid === "string" && pod.metadata.uid.length > 0 ? pod.metadata.uid : undefined,
     podIP: pod.status?.podIP ?? undefined,
     annotations: pod.metadata?.annotations ?? {},
     labels: pod.metadata?.labels ?? {},

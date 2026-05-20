@@ -113,6 +113,23 @@ describe("readJournalLines", () => {
     expect(mockExecFileAsync).not.toHaveBeenCalled();
   });
 
+  it("resolves user journal users when maxLines is 0", async () => {
+    const err = new Error("Command failed: id") as NodeJS.ErrnoException & { stderr?: string };
+    err.code = "1";
+    err.stderr = "id: 'missing': no such user";
+    mockExecFileAsync.mockRejectedValue(err);
+
+    await expect(
+      readJournalLines({
+        unit: "app.service",
+        journalScope: "user",
+        journalUser: "missing",
+        maxLines: 0,
+      }),
+    ).rejects.toMatchObject({ code: "ENOUSER" });
+    expect(callArgs(0)).toEqual(["-u", "missing"]);
+  });
+
   it("passes sinceSeconds as --since argument", async () => {
     setupSuccess("2024-01-15T10:30:00+0000 host unit[1]: msg\n");
 
@@ -421,6 +438,27 @@ describe("readJournalLines", () => {
 });
 
 describe("streamJournalLines", () => {
+  it("resolves user journal users when maxLines is 0 before streaming", async () => {
+    const err = new Error("Command failed: id") as NodeJS.ErrnoException & { stderr?: string };
+    err.code = "1";
+    err.stderr = "id: 'missing': no such user";
+    mockExecFileAsync.mockRejectedValue(err);
+
+    await expect(
+      streamJournalLines(
+        {
+          unit: "app.service",
+          journalScope: "user",
+          journalUser: "missing",
+          maxLines: 0,
+        },
+        vi.fn(),
+      ),
+    ).rejects.toMatchObject({ code: "ENOUSER" });
+    expect(callArgs(0)).toEqual(["-u", "missing"]);
+    expect(mockSpawn).not.toHaveBeenCalled();
+  });
+
   it("strips system journal No entries output in the streaming path", async () => {
     setupSpawnResult("-- No entries --\n");
     const lines: string[] = [];

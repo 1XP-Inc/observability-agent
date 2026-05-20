@@ -188,13 +188,13 @@ export async function readJournalLines(params: {
   untilTime?: string;
 }): Promise<string[]> {
   const { unit, maxLines, sinceSeconds, sinceTime, untilTime } = params;
-  if (maxLines <= 0) return [];
 
   if ((params.journalScope ?? "system") === "user") {
     if (!params.journalUser) {
       throw codedError("journalUser is required for user journal scope", "EINVAL");
     }
     const uid = await resolveJournalUserUid(params.journalUser);
+    if (maxLines <= 0) return [];
     const args = ["--user-unit", unit, `_UID=${uid}`, "-n", String(maxLines), "--no-hostname", "--no-pager", "-o", "short-iso"];
     appendTimeArgs(args, { sinceSeconds, sinceTime, untilTime });
 
@@ -211,6 +211,7 @@ export async function readJournalLines(params: {
     return journalLinesFromStdout(result.stdout, { stripNoEntries: true });
   }
 
+  if (maxLines <= 0) return [];
   const args = ["-u", unit, "-n", String(maxLines), "--no-pager", "-o", "short-iso"];
   appendTimeArgs(args, { sinceSeconds, sinceTime, untilTime });
   const result = await execJournalctl(args, maxLines);
@@ -230,13 +231,13 @@ export async function streamJournalLines(
   onLine: (line: string) => void | Promise<void>,
 ): Promise<number> {
   const { unit, maxLines, sinceSeconds, sinceTime, untilTime } = params;
-  if (maxLines != null && maxLines <= 0) return 0;
 
   if ((params.journalScope ?? "system") === "user") {
     if (!params.journalUser) {
       throw codedError("journalUser is required for user journal scope", "EINVAL");
     }
     const uid = await resolveJournalUserUid(params.journalUser);
+    if (maxLines != null && maxLines <= 0) return 0;
     const args = ["--user-unit", unit, `_UID=${uid}`, "--no-hostname", "--no-pager", "-o", "short-iso"];
     appendMaxLinesArg(args, maxLines);
     appendTimeArgs(args, { sinceSeconds, sinceTime, untilTime });
@@ -255,6 +256,7 @@ export async function streamJournalLines(
     return result.lineCount;
   }
 
+  if (maxLines != null && maxLines <= 0) return 0;
   const args = ["-u", unit, "--no-pager", "-o", "short-iso"];
   appendMaxLinesArg(args, maxLines);
   appendTimeArgs(args, { sinceSeconds, sinceTime, untilTime });

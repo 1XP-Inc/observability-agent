@@ -40,10 +40,10 @@ export async function runBundle(params: {
     }
 
     if (req.include.events.enabled) {
-      const podSetByNs: Map<string, Set<string>> = new Map();
+      const podUidByNameByNs: Map<string, Map<string, string | undefined>> = new Map();
       for (const p of pods) {
-        if (!podSetByNs.has(p.namespace)) podSetByNs.set(p.namespace, new Set());
-        podSetByNs.get(p.namespace)!.add(p.name);
+        if (!podUidByNameByNs.has(p.namespace)) podUidByNameByNs.set(p.namespace, new Map());
+        podUidByNameByNs.get(p.namespace)!.set(p.name, p.uid);
       }
 
       const nowMs = Date.now();
@@ -52,7 +52,7 @@ export async function runBundle(params: {
           ? nowMs - req.timeWindow.sinceSeconds * 1000
           : Date.parse(req.timeWindow.start);
 
-      await collectEvents({ coreV1, writer, podSetByNs, req, eventsSinceTimeMs });
+      await collectEvents({ coreV1, writer, podUidByNameByNs, req, eventsSinceTimeMs });
     }
 
     if (req.include.metrics.enabled) {

@@ -146,6 +146,20 @@ describe("normalizeBundleRequest", () => {
       ).toThrow("timeWindow.end must be >= timeWindow.start");
     });
 
+    it("rejects sub-millisecond end < start", () => {
+      expect(() =>
+        normalizeBundleRequest(
+          minimalSelector({
+            timeWindow: {
+              start: "2024-01-01T00:00:00.9999Z",
+              end: "2024-01-01T00:00:00.9998Z",
+            },
+          }),
+          config,
+        ),
+      ).toThrow("timeWindow.end must be >= timeWindow.start");
+    });
+
     it("rejects non-Z timestamps", () => {
       expect(() =>
         normalizeBundleRequest(
@@ -686,28 +700,17 @@ describe("normalizeBundleRequest", () => {
       expect(r.include.logs.enabled).toBe(true);
     });
 
-    it("handles include.logs that is not an object", () => {
-      const r = normalizeBundleRequest(
-        minimalSelector({ include: { logs: "not-object" } }),
-        config,
-      );
-      expect(r.include.logs.enabled).toBe(true);
-    });
-
-    it("handles include.events that is not an object", () => {
-      const r = normalizeBundleRequest(
-        minimalSelector({ include: { events: "not-object" } }),
-        config,
-      );
-      expect(r.include.events.enabled).toBe(true);
-    });
-
-    it("handles include.metrics that is not an object", () => {
-      const r = normalizeBundleRequest(
-        minimalSelector({ include: { metrics: "not-object" } }),
-        config,
-      );
-      expect(r.include.metrics.enabled).toBe(true);
+    it.each([
+      ["include.logs", { logs: false }],
+      ["include.events", { events: false }],
+      ["include.metrics", { metrics: false }],
+    ])("rejects malformed %s child values", (path, include) => {
+      expect(() =>
+        normalizeBundleRequest(
+          minimalSelector({ include }),
+          config,
+        ),
+      ).toThrow(`Invalid object: ${path}`);
     });
   });
 

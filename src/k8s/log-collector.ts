@@ -70,7 +70,7 @@ function processLogLines(params: {
       if (t == null) continue;
       if (t < params.absStartMs! || t > params.absEndMs!) continue;
     }
-    if (shouldExcludeLine(parsed.msg, params.excludePatterns)) continue;
+    if (shouldExcludeLine(line, params.excludePatterns)) continue;
     out.push(parsed);
   }
   return out;

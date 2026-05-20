@@ -86,12 +86,18 @@ export function registerRoutes(
     }
 
     const limit = 500;
-    const body =
-      ns === "*"
-        ? await listPodsAllNamespaces({ coreV1, labelSelector: selector, limit })
-        : await listPodsNamespaced({ coreV1, namespace: ns, labelSelector: selector, limit });
+    const allItems: any[] = [];
+    let continueToken: string | undefined;
+    do {
+      const body =
+        ns === "*"
+          ? await listPodsAllNamespaces({ coreV1, labelSelector: selector, limit, continueToken })
+          : await listPodsNamespaced({ coreV1, namespace: ns, labelSelector: selector, limit, continueToken });
+      allItems.push(...((body.items ?? []) as any[]));
+      continueToken = hasString(body.metadata?._continue) ? body.metadata._continue : undefined;
+    } while (continueToken);
 
-    const items = ((body.items ?? []) as any[]).filter((p: any) => {
+    const items = allItems.filter((p: any) => {
       if (!needle) return true;
       return String(p?.metadata?.name ?? "").includes(needle);
     });

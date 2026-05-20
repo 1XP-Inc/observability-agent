@@ -6,6 +6,17 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
+function optionalRecordChild(
+  parent: Record<string, unknown> | undefined,
+  key: string,
+  name: string,
+): Record<string, unknown> | undefined {
+  if (!parent || !Object.prototype.hasOwnProperty.call(parent, key)) return undefined;
+  const v = parent[key];
+  if (!isRecord(v)) throw new HttpError(400, `Invalid object: ${name}`);
+  return v;
+}
+
 function asInt(name: string, v: unknown): number | undefined {
   if (v == null) return undefined;
   if (typeof v === "number" && Number.isSafeInteger(v)) return v;
@@ -49,7 +60,7 @@ function asStringArray(name: string, v: unknown): string[] | undefined {
   return out;
 }
 
-function parseIso8601Z(name: string, v: unknown): { iso: string; ms: number } {
+function parseIso8601Z(name: string, v: unknown): { iso: string; ms: number; epochNs: bigint } {
   if (typeof v !== "string") throw new HttpError(400, `Invalid string: ${name}`);
   const iso = v.trim();
   if (!iso.endsWith("Z")) {
@@ -59,7 +70,7 @@ function parseIso8601Z(name: string, v: unknown): { iso: string; ms: number } {
   if (!match) throw new HttpError(400, `Invalid datetime: ${name}`);
   const ms = Date.parse(iso);
   if (!Number.isFinite(ms) || Number.isNaN(ms)) throw new HttpError(400, `Invalid datetime: ${name}`);
-  const [, yearRaw, monthRaw, dayRaw, hourRaw, minuteRaw, secondRaw] = match;
+  const [, yearRaw, monthRaw, dayRaw, hourRaw, minuteRaw, secondRaw, fractionRaw] = match;
   const d = new Date(ms);
   if (
     d.getUTCFullYear() !== Number(yearRaw) ||
@@ -71,7 +82,20 @@ function parseIso8601Z(name: string, v: unknown): { iso: string; ms: number } {
   ) {
     throw new HttpError(400, `Invalid datetime: ${name}`);
   }
-  return { iso, ms };
+  const wholeSecondMs = Date.UTC(
+    Number(yearRaw),
+    Number(monthRaw) - 1,
+    Number(dayRaw),
+    Number(hourRaw),
+    Number(minuteRaw),
+    Number(secondRaw),
+  );
+  const fractionNs = BigInt((fractionRaw ?? "").padEnd(9, "0") || "0");
+  return {
+    iso,
+    ms,
+    epochNs: BigInt(wholeSecondMs) * 1_000_000n + fractionNs,
+  };
 }
 
 function clampLimit(
@@ -119,8 +143,8 @@ export function normalizeBundleRequest(input: unknown, config: OAConfig): Normal
     }
     const start = parseIso8601Z("timeWindow.start", timeWindowObj.start);
     const end = parseIso8601Z("timeWindow.end", timeWindowObj.end);
-    if (end.ms < start.ms) throw new HttpError(400, "timeWindow.end must be >= timeWindow.start");
-    const windowSec = Math.ceil((end.ms - start.ms) / 1000);
+    if (end.epochNs < start.epochNs) throw new HttpError(400, "timeWindow.end must be >= timeWindow.start");
+    const windowSec = Number((end.epochNs - start.epochNs + 999_999_999n) / 1_000_000_000n);
     if (windowSec > effSinceSecondsMax) {
       throw new HttpError(400, `timeWindow range exceeds sinceSecondsMax (${windowSec} > ${effSinceSecondsMax})`);
     }
@@ -167,9 +191,9 @@ export function normalizeBundleRequest(input: unknown, config: OAConfig): Normal
   );
 
   const includeObj = isRecord(body.include) ? body.include : undefined;
-  const logsObj = isRecord(includeObj?.logs) ? includeObj?.logs : undefined;
-  const eventsObj = isRecord(includeObj?.events) ? includeObj?.events : undefined;
-  const metricsObj = isRecord(includeObj?.metrics) ? includeObj?.metrics : undefined;
+  const logsObj = optionalRecordChild(includeObj, "logs", "include.logs");
+  const eventsObj = optionalRecordChild(includeObj, "events", "include.events");
+  const metricsObj = optionalRecordChild(includeObj, "metrics", "include.metrics");
 
   const includeLogs = asBool("include.logs.enabled", logsObj?.enabled) ?? config.defaults.include.logs;
   const includeEvents = asBool("include.events.enabled", eventsObj?.enabled) ?? config.defaults.include.events;

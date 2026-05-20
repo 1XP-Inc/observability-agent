@@ -13,15 +13,20 @@ export async function listPodsAllNamespaces(params: {
   coreV1: CoreV1Api;
   labelSelector?: string;
   limit?: number;
+  continueToken?: string;
 }): Promise<any> {
   const fn = (params.coreV1 as any).listPodForAllNamespaces as Function;
   if (typeof fn !== "function") throw new Error("K8s client missing listPodForAllNamespaces");
 
   if (fn.length <= 2) {
     // Newer: (request?: { ... }, options?)
-    const res = await (params.coreV1 as any).listPodForAllNamespaces({
+    const request: Record<string, unknown> = {
       labelSelector: params.labelSelector,
       limit: params.limit,
+    };
+    if (params.continueToken !== undefined) request._continue = params.continueToken;
+    const res = await (params.coreV1 as any).listPodForAllNamespaces({
+      ...request,
     });
     return unwrapBody<any>(res);
   }
@@ -30,7 +35,7 @@ export async function listPodsAllNamespaces(params: {
   const res = await (params.coreV1 as any).listPodForAllNamespaces(
     undefined,
     undefined,
-    undefined,
+    params.continueToken,
     undefined,
     params.labelSelector,
     params.limit,
@@ -43,16 +48,19 @@ export async function listPodsNamespaced(params: {
   namespace: string;
   labelSelector?: string;
   limit?: number;
+  continueToken?: string;
 }): Promise<any> {
   const fn = (params.coreV1 as any).listNamespacedPod as Function;
   if (typeof fn !== "function") throw new Error("K8s client missing listNamespacedPod");
 
   if (fn.length <= 2) {
-    const res = await (params.coreV1 as any).listNamespacedPod({
+    const request: Record<string, unknown> = {
       namespace: params.namespace,
       labelSelector: params.labelSelector,
       limit: params.limit,
-    });
+    };
+    if (params.continueToken !== undefined) request._continue = params.continueToken;
+    const res = await (params.coreV1 as any).listNamespacedPod(request);
     return unwrapBody<any>(res);
   }
 
@@ -60,7 +68,7 @@ export async function listPodsNamespaced(params: {
     params.namespace,
     undefined,
     undefined,
-    undefined,
+    params.continueToken,
     undefined,
     params.labelSelector,
     params.limit,
@@ -120,40 +128,48 @@ export async function readPodLog(params: {
 
   // Best-effort positional call for older clients. Signatures vary a lot across versions,
   // so try a couple of common shapes.
-  const tryCalls: Array<() => Promise<unknown>> = [
-    // Shape similar to older client-node we started with:
-    // (name, namespace, container, follow, pretty, _continue, limitBytes, previous, sinceSeconds, tailLines, timestamps)
-    async () =>
-      (params.coreV1 as any).readNamespacedPodLog(
-        params.name,
-        params.namespace,
-        params.container,
-        false,
-        undefined,
-        undefined,
-        undefined,
-        params.previous,
-        params.sinceSeconds,
-        params.tailLines,
-        params.timestamps,
-      ),
-    // Another common shape:
-    // (name, namespace, container, follow, pretty, previous, sinceSeconds, sinceTime, timestamps, tailLines, limitBytes)
-    async () =>
-      (params.coreV1 as any).readNamespacedPodLog(
-        params.name,
-        params.namespace,
-        params.container,
-        false,
-        undefined,
-        params.previous,
-        params.sinceSeconds,
-        params.sinceTime,
-        params.timestamps,
-        params.tailLines,
-        undefined,
-      ),
-  ];
+  const shape1 = async () =>
+    (params.coreV1 as any).readNamespacedPodLog(
+      params.name,
+      params.namespace,
+      params.container,
+      false,
+      undefined,
+      undefined,
+      undefined,
+      params.previous,
+      params.sinceSeconds,
+      params.tailLines,
+      params.timestamps,
+    );
+  const shape2 = async () =>
+    (params.coreV1 as any).readNamespacedPodLog(
+      params.name,
+      params.namespace,
+      params.container,
+      false,
+      undefined,
+      params.previous,
+      params.sinceSeconds,
+      params.sinceTime,
+      params.timestamps,
+      params.tailLines,
+      undefined,
+    );
+
+  const tryCalls: Array<() => Promise<unknown>> = params.sinceTime !== undefined
+    ? [
+        // Shape 1 has no sinceTime slot, so absolute windows must only use a shape that can pass it.
+        shape2,
+      ]
+    : [
+        // Shape similar to older client-node we started with:
+        // (name, namespace, container, follow, pretty, _continue, limitBytes, previous, sinceSeconds, tailLines, timestamps)
+        shape1,
+        // Another common shape:
+        // (name, namespace, container, follow, pretty, previous, sinceSeconds, sinceTime, timestamps, tailLines, limitBytes)
+        shape2,
+      ];
 
   let lastErr: unknown;
   for (const fnCall of tryCalls) {

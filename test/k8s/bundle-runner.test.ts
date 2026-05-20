@@ -539,6 +539,30 @@ describe("runBundle", () => {
       expect(logRecords[0].line).toBe("important msg");
     });
 
+    it("excludePatterns apply to the raw timestamped log line", async () => {
+      const { records } = makeWriter();
+      const pod = createMockPod({ namespace: "default", name: "p1", containers: ["main"] });
+      setupPodList([pod]);
+      (readPodLog as any).mockResolvedValue(
+        "2024-01-01T00:00:00Z old window\n" +
+        "2024-01-02T00:00:00Z keep me\n"
+      );
+      (listEventsNamespaced as any).mockResolvedValue({ items: [] });
+
+      const job = makeJob({
+        params: makeParams({
+          include: {
+            ...makeParams().include,
+            logs: { enabled: true, tailLines: 100, previous: false, timestamps: true, excludePatterns: ["2024-01-01"] },
+          },
+        }),
+      });
+      await runBundle({ config, coreV1, job });
+
+      const logRecords = records.filter((r) => r.type === "log");
+      expect(logRecords.map((r) => r.line)).toEqual(["keep me"]);
+    });
+
     it("maxTotalLogLines exceeded throws HttpError 400", async () => {
       makeWriter();
       // 2 pods x 1 container x 100 tailLines = 200 expected > maxTotalLogLines=50
@@ -1120,6 +1144,63 @@ describe("runBundle", () => {
         items: [
           createMockEvent({ lastTimestamp: now, involvedObject: { kind: "Pod", name: "p1", namespace: "default" } }),
           createMockEvent({ lastTimestamp: now, involvedObject: { kind: "Pod", name: "other-pod", namespace: "default" } }),
+        ],
+      });
+
+      const job = makeJob();
+      await runBundle({ config, coreV1, job });
+
+      const eventRecords = records.filter((r) => r.type === "event");
+      expect(eventRecords.length).toBe(1);
+      expect(eventRecords[0].involvedObject.name).toBe("p1");
+    });
+
+    it("filters same-name pod events by involvedObject.uid when available", async () => {
+      const { records } = makeWriter();
+      const pod = createMockPod({ namespace: "default", name: "p1" });
+      pod.metadata.uid = "new-pod-uid";
+      setupPodList([pod]);
+      setupPodLogs("");
+
+      const now = new Date().toISOString();
+      (listEventsNamespaced as any).mockResolvedValue({
+        items: [
+          {
+            metadata: { creationTimestamp: now },
+            lastTimestamp: now,
+            reason: "OldPod",
+            message: "old pod event",
+            involvedObject: { kind: "Pod", name: "p1", namespace: "default", uid: "old-pod-uid" },
+          },
+          {
+            metadata: { creationTimestamp: now },
+            lastTimestamp: now,
+            reason: "NewPod",
+            message: "new pod event",
+            involvedObject: { kind: "Pod", name: "p1", namespace: "default", uid: "new-pod-uid" },
+          },
+        ],
+      });
+
+      const job = makeJob();
+      await runBundle({ config, coreV1, job });
+
+      const eventRecords = records.filter((r) => r.type === "event");
+      expect(eventRecords.length).toBe(1);
+      expect(eventRecords[0].reason).toBe("NewPod");
+    });
+
+    it("falls back to pod name matching when event uid is missing", async () => {
+      const { records } = makeWriter();
+      const pod = createMockPod({ namespace: "default", name: "p1" });
+      pod.metadata.uid = "pod-uid";
+      setupPodList([pod]);
+      setupPodLogs("");
+
+      const now = new Date().toISOString();
+      (listEventsNamespaced as any).mockResolvedValue({
+        items: [
+          createMockEvent({ lastTimestamp: now, involvedObject: { kind: "Pod", name: "p1", namespace: "default" } }),
         ],
       });
 

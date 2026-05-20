@@ -158,16 +158,25 @@ function userJournalErrorMessage(reason: string, err: any): string {
   return fallbackErrorMessage(err);
 }
 
-function filterLine(line: string, filters: LogFilters): ParsedLine | undefined {
+function parseSourceLine(line: string): ParsedLine | undefined {
   if (!line.length) return undefined;
   const parsed = parseLogLine(line, true);
   const sortMs = parseLineTimeMs(parsed.ts);
-  if (filters.startMs != null && filters.endMs != null && sortMs != null) {
-    if (sortMs < filters.startMs || sortMs > filters.endMs) return undefined;
-  }
-  if (!shouldIncludeLine(parsed.msg, filters.includePatterns)) return undefined;
-  if (shouldExcludeLine(parsed.msg, filters.excludePatterns)) return undefined;
   return { ...parsed, sortMs };
+}
+
+function isWithinTimeWindow(sortMs: number | undefined, filters: LogFilters): boolean {
+  if (filters.startMs != null && filters.endMs != null && sortMs != null) {
+    return sortMs >= filters.startMs && sortMs <= filters.endMs;
+  }
+  return true;
+}
+
+function matchesLineFilters(rawLine: string, parsed: ParsedLine, filters: LogFilters): boolean {
+  if (!isWithinTimeWindow(parsed.sortMs, filters)) return false;
+  if (!shouldIncludeLine(rawLine, filters.includePatterns)) return false;
+  if (shouldExcludeLine(rawLine, filters.excludePatterns)) return false;
+  return true;
 }
 
 function timeBounds(timeWindow: NonNullable<StandaloneNormalizedRequest["timeWindow"]>): Pick<LogFilters, "startMs" | "endMs"> {
@@ -236,13 +245,14 @@ export async function collectStandaloneLogs(params: {
   function addLine(state: SourceState, base: LogSourceBase, line: string, sourceFilters: LogFilters): void {
     if (!line.length) return;
     state.summary.rawLogRecords++;
-    const parsed = filterLine(line, sourceFilters);
+    const parsed = parseSourceLine(line);
     if (!parsed) return;
-    state.summary.matchedLogRecords++;
-    const rankTimeMs = parsed.sortMs ?? state.lastTimestampMs;
-    if (parsed.sortMs != null) {
+    if (parsed.sortMs != null && isWithinTimeWindow(parsed.sortMs, sourceFilters)) {
       state.lastTimestampMs = parsed.sortMs;
     }
+    if (!matchesLineFilters(line, parsed, sourceFilters)) return;
+    state.summary.matchedLogRecords++;
+    const rankTimeMs = parsed.sortMs ?? state.lastTimestampMs;
     candidates.add({
       sourceKey: state.key,
       sequence: nextSequence++,
@@ -369,6 +379,7 @@ export async function collectStandaloneLogs(params: {
 
   const matchedLogRecords = sourceStates.reduce((total, state) => total + state.summary.matchedLogRecords, 0);
   const lineLimited = matchedLogRecords > selected.length;
+  const diagnosticRecords = sideRecords.length;
   if (sourceStates.length > 0) {
     await writer.writeRecord({
       type: "log_summary",
@@ -377,6 +388,7 @@ export async function collectStandaloneLogs(params: {
       lineLimited,
       matchedLogRecords,
       returnedLogRecords: selected.length,
+      diagnosticRecords,
       sources: sourceStates.map((state) => state.summary),
     });
   }

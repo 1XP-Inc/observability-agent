@@ -1,6 +1,7 @@
 export type PodRef = {
   namespace: string;
   name: string;
+  uid?: string;
   podIP?: string;
   annotations: Record<string, string>;
   labels: Record<string, string>;
