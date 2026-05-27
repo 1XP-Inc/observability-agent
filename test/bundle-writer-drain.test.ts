@@ -4,6 +4,7 @@ import { vi } from "vitest";
 // createGzip 반환값의 write 를 래핑하여 false 반환 + 비동기 drain/error emit
 let forceBackpressure = false;
 let forceErrorOnDrain = false;
+let lastGzipStream: ReturnType<typeof import("node:zlib").createGzip> | undefined;
 
 vi.mock("node:zlib", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:zlib")>();
@@ -11,6 +12,7 @@ vi.mock("node:zlib", async (importOriginal) => {
     ...actual,
     createGzip: (...args: any[]) => {
       const gzipStream = (actual.createGzip as any)(...args);
+      lastGzipStream = gzipStream;
       const originalWrite = gzipStream.write.bind(gzipStream);
 
       gzipStream.write = function (chunk: any, ...rest: any[]) {
@@ -47,6 +49,7 @@ beforeEach(() => {
   outPath = path.join(tmpDir, "drain.ndjson.gz");
   forceBackpressure = false;
   forceErrorOnDrain = false;
+  lastGzipStream = undefined;
 });
 
 afterEach(() => {
@@ -97,6 +100,8 @@ describe("createNdjsonGzipWriter drain 경로", () => {
     const writer = createNdjsonGzipWriter(outPath);
     // write -> false 반환 -> onError 콜백 호출 -> reject
     await expect(writer.writeRecord({ error: "test" })).rejects.toThrow("forced gzip error");
+    expect(lastGzipStream).toBeDefined();
+    expect(lastGzipStream!.listenerCount("drain")).toBe(0);
 
     // pipeline 프로미스도 rejected 되므로 finalize 에서 에러를 잡아준다
     // (unhandled rejection 방지)
