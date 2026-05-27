@@ -17,12 +17,16 @@ export function createNdjsonGzipWriter(outPath: string): NdjsonGzipWriter {
   async function writeChunk(chunk: string): Promise<void> {
     if (!gzip.write(chunk)) {
       await new Promise<void>((resolve, reject) => {
-        const onError = (err: Error) => reject(err);
-        gzip.once("error", onError);
-        gzip.once("drain", () => {
+        const onError = (err: Error) => {
+          gzip.off("drain", onDrain);
+          reject(err);
+        };
+        const onDrain = () => {
           gzip.off("error", onError);
           resolve();
-        });
+        };
+        gzip.once("error", onError);
+        gzip.once("drain", onDrain);
       });
     }
   }
